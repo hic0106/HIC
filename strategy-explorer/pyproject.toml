@@ -1,0 +1,34 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ai-strategy-explorer"
+version = "0.1.0"
+description = "AI Strategy Explorer - research-only laboratory that discovers, backtests and validates novel trading rules from OHLCV data. No live trading."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "UNLICENSED" }
+dependencies = [
+    "numpy>=1.24",
+    "pandas>=2.0",
+]
+
+[project.optional-dependencies]
+parquet = ["pyarrow>=12"]
+llm = ["anthropic>=1.8"]   # output_config, server-side fallbacks
+dev = ["pytest>=7"]
+
+[project.scripts]
+strategy-explorer = "strategy_explorer.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+strategy_explorer = ["ui/static/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-q"

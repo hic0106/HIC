@@ -1,0 +1,23 @@
+# Demo: synthetic 4h series with a hidden squeeze -> breakout behaviour.
+# The pipeline should rediscover it; every result still passes through the full validation firewall.
+[experiment]
+name = "demo-synthetic-planted"
+random_seed = 42
+
+[data]
+provider = "synthetic"
+asset = "SYNTHDEMO"
+timeframe = "4h"
+extra_timeframes = ["1d"]
+n_bars = 9000
+seed = 5
+plant = "squeeze_breakout"
+plant_strength = 3.0
+
+[search]
+max_trials = 600          # pre-committed budget; every trial is recorded in the ledger
+explore_fraction = 0.6    # 60% structural exploration / 40% parametric exploitation
+workers = 0               # 0 = all CPU cores (results do not depend on the worker count)
+
+[llm]
+provider = "offline"      # deterministic template proposer; set "anthropic" + ANTHROPIC_API_KEY to use Claude

@@ -1,0 +1,41 @@
+# Binance USD-M perpetual, public market data only (klines + funding history; no API key, no trading endpoints).
+[experiment]
+name = "btcusdt-4h"
+random_seed = 42
+
+[data]
+provider = "binance"
+market = "usdm"
+asset = "BTCUSDT"
+asset_class = "crypto"
+timeframe = "4h"
+extra_timeframes = ["1d"]
+start = "2020-01-01"
+end = "2026-06-30"        # fixed end -> fixed data_version; the holdout is the last part of this window
+cache_dir = "data/cache"
+
+[split]
+mode = "fractions"
+train = 0.5
+validation = 0.15
+test = 0.2                # remaining 15% = FINAL HOLDOUT (locked until the end of the run)
+
+[costs]
+fee_bps = 5.0             # per side; Binance USD-M base taker fee 0.05%
+slippage_bps = 2.0
+funding_mode = "series"   # historical funding rates: longs pay positive funding, shorts receive it
+
+[search]
+max_trials = 2000
+explore_fraction = 0.6
+
+[llm]
+provider = "offline"
+
+[[cross_asset.assets]]
+provider = "binance"
+asset = "ETHUSDT"
+
+[[cross_asset.assets]]
+provider = "binance"
+asset = "SOLUSDT"

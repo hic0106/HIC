@@ -1,0 +1,13 @@
+workspace/
+exports/
+/data/
+# the repository root ignores every "data/" directory; the Python data package is source code
+!/src/strategy_explorer/data/
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+__pycache__/
+.pytest_cache/
+*.egg-info/
+build/
+dist/

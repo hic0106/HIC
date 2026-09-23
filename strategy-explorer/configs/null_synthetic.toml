@@ -1,0 +1,18 @@
+# Null test: a martingale with volatility regimes and no planted edge.
+# Expected outcome: no RESEARCH_WINNER and the holdout stays LOCKED.
+[experiment]
+name = "null-synthetic"
+random_seed = 42
+
+[data]
+provider = "synthetic"
+asset = "SYNTHNULL"
+timeframe = "4h"
+extra_timeframes = ["1d"]
+n_bars = 9000
+seed = 21
+plant = ""
+
+[search]
+max_trials = 600
+explore_fraction = 0.6

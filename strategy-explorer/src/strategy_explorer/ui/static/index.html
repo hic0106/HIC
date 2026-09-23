@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AI Strategy Explorer · Quant Research Laboratory</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' fill='%230b0f14'/%3E%3Cpath d='M2 12l4-5 3 3 5-7' stroke='%2334d399' stroke-width='2' fill='none'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="lab">
+  <div class="brand"><b>AI STRATEGY EXPLORER</b><span>QUANT RESEARCH LABORATORY</span></div>
+  <span class="badge-ro" title="No order placement, no exchange credentials, no deployment">RESEARCH ONLY · NO LIVE TRADING</span>
+  <div class="hdr-right">
+    <span class="muted mono">EXPERIMENT</span>
+    <select id="exp-select"></select>
+    <span id="exp-status"></span>
+  </div>
+</header>
+<nav class="tabs" id="tabs">
+  <button data-tab="data" class="active">DATA</button>
+  <button data-tab="patterns">PATTERN LAB</button>
+  <button data-tab="discovery">STRATEGY DISCOVERY</button>
+  <button data-tab="experiments">EXPERIMENTS</button>
+  <button data-tab="candidates">CANDIDATES</button>
+  <button data-tab="validation">VALIDATION</button>
+  <button data-tab="memory">RESEARCH MEMORY</button>
+</nav>
+<main>
+  <section class="tab active" id="tab-data"></section>
+  <section class="tab" id="tab-patterns"></section>
+  <section class="tab" id="tab-discovery"></section>
+  <section class="tab" id="tab-experiments"></section>
+  <section class="tab" id="tab-candidates"></section>
+  <section class="tab" id="tab-validation"></section>
+  <section class="tab" id="tab-memory"></section>
+</main>
+<div class="modal-bg" id="modal"><div class="modal" id="modal-body"></div></div>
+<script src="/static/chart.js"></script>
+<script src="/static/app.js"></script>
+</body>
+</html>

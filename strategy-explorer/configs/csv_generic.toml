@@ -1,0 +1,18 @@
+# Any OHLCV file: CSV columns timestamp, open, high, low, close[, volume, quote_volume, number_of_trades,
+# taker_buy_volume, funding_rate, open_interest, long_short_ratio]. Timestamps in s/ms/us/ns or ISO-8601 (UTC).
+# path may be a file or a directory holding {ASSET}_{TIMEFRAME}.csv files.
+[experiment]
+name = "csv-generic"
+random_seed = 42
+
+[data]
+provider = "csv"
+path = "data"
+asset = "SPY"
+asset_class = "etf"       # costs_by_asset_class.etf applies (no funding)
+timeframe = "1d"
+extra_timeframes = []
+
+[search]
+max_trials = 1500
+explore_fraction = 0.6
