@@ -9,6 +9,7 @@ import { Logger } from './logger.js';
 import { MarketData, CHART_INTERVALS } from './marketData.js';
 import { Engine } from './engine.js';
 import { STRATEGIES, STRATEGY_META } from './strategies.js';
+import { Controller, CONTROLLER_MODES } from './controller/controllerEngine.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const HOST = process.env.HOST || '127.0.0.1';
@@ -18,6 +19,14 @@ const store = new Store();
 const log = new Logger(store);
 const md = new MarketData(SYMBOLS, log);
 const engine = new Engine(store, md, log);
+// Controller layer: strategies -> controller (size multiplier) -> existing execution engine
+const controller = new Controller({ store, md, engine, log });
+engine.controller = controller;
+const fullSnapshot = () => {
+  const s = engine.snapshot();
+  try { s.controller = controller.compact(); } catch (e) { s.controller = { mode: 'ERROR', error: e.message }; }
+  return s;
+};
 
 const app = express();
 app.use(express.json({ limit: '100kb' }));
@@ -35,7 +44,7 @@ app.get('/vendor/lightweight-charts.js', (req, res) =>
 const ok = (res, r = { ok: true }) => res.status(r.ok === false ? 400 : 200).json(r);
 const confirmed = (req, word) => String(req.body?.confirm || '').trim().toUpperCase() === word;
 
-app.get('/api/snapshot', (req, res) => res.json(engine.snapshot()));
+app.get('/api/snapshot', (req, res) => res.json(fullSnapshot()));
 app.get('/api/config', (req, res) => res.json({ config: store.config, meta: { symbols: SYMBOLS, strategies: STRATEGIES, intervals: CHART_INTERVALS, supportsShort: Object.fromEntries(STRATEGIES.map((s) => [s, STRATEGY_META[s].supportsShort])) } }));
 app.get('/api/logs', (req, res) => res.json(log.recent(1000)));
 
@@ -148,6 +157,59 @@ app.post('/api/positions/close-all', async (req, res) => {
   ok(res, await engine.closeAll('EMERGENCY_CLOSE'));
 });
 
+// ---- Self-Improving Controller
+app.get('/api/controller', (req, res) => {
+  try { res.json(controller.detail()); } catch (e) { res.status(500).json({ ok: false, msg: e.message }); }
+});
+app.post('/api/controller/mode', (req, res) => {
+  const mode = req.body.mode;
+  if (!CONTROLLER_MODES.includes(mode)) return ok(res, { ok: false, msg: 'invalid mode' });
+  if (mode === 'LIVE_APPROVAL' && !confirmed(req, 'LIVE')) return ok(res, { ok: false, msg: 'Type LIVE to confirm', needConfirm: true });
+  ok(res, controller.setMode(mode));
+});
+app.post('/api/controller/disable', (req, res) => ok(res, controller.disable()));
+app.post('/api/controller/evaluate', (req, res) => ok(res, controller.evaluate('manual')));
+app.post('/api/controller/approve', (req, res) => {
+  if (!confirmed(req, 'APPROVE')) return ok(res, { ok: false, msg: 'confirmation required' });
+  ok(res, controller.approve(String(req.body.id || '')));
+});
+app.post('/api/controller/reject', (req, res) => ok(res, controller.reject(String(req.body.id || ''))));
+app.post('/api/controller/config', (req, res) => {
+  try {
+    const b = req.body.settings || {};
+    const c = store.config.controller;
+    const n = (v, o) => num(v, o);
+    const next = structuredClone(c);
+    if (![1, 7, 14, 30].includes(Number(b.reevalDays))) throw new Error('reevalDays must be 1, 7, 14 or 30');
+    next.reevalDays = Number(b.reevalDays);
+    next.minHistoryDays = n(b.minHistoryDays, { min: 30, max: 730, int: true });
+    for (const k of ['fast', 'main', 'stability', 'extended']) next.windows[k] = n(b.windows[k], { min: 7, max: 730, int: true });
+    if (!(next.windows.fast < next.windows.main && next.windows.main <= next.windows.stability && next.windows.stability <= next.windows.extended)) throw new Error('windows must satisfy fast < main <= stability <= extended');
+    for (const k of ['return', 'drawdown', 'riskAdjusted', 'consistency']) next.weights[k] = n(b.weights[k], { min: 0, max: 1 });
+    if (Object.values(next.weights).reduce((a, x) => a + x, 0) <= 0) throw new Error('weights sum must be > 0');
+    for (const k of ['boost', 'normal', 'cautious']) next.thresholds[k] = n(b.thresholds[k], { min: -1, max: 1 });
+    if (!(next.thresholds.boost > next.thresholds.normal && next.thresholds.normal > next.thresholds.cautious)) throw new Error('thresholds must satisfy boost > normal > cautious');
+    for (const k of ['noBoostDDPct', 'reduceDDPct', 'pauseDDPct']) next.guards[k] = n(b.guards[k], { min: 1, max: 90 });
+    if (!(next.guards.noBoostDDPct <= next.guards.reduceDDPct && next.guards.reduceDDPct <= next.guards.pauseDDPct)) throw new Error('drawdown guards must satisfy noBoost <= reduce <= pause');
+    next.guards.noBoostConsecLosses = n(b.guards.noBoostConsecLosses, { min: 1, max: 50, int: true });
+    next.guards.cautionConsecLosses = n(b.guards.cautionConsecLosses, { min: 1, max: 50, int: true });
+    next.guards.correlationThreshold = n(b.guards.correlationThreshold, { min: 0.1, max: 1 });
+    next.guards.correlationGuard = !!b.guards.correlationGuard;
+    next.guards.maxCoinExposurePctForBoost = n(b.guards.maxCoinExposurePctForBoost, { min: 0, max: 1000 });
+    for (const st of STRATEGIES) for (const side of ['LONG', 'SHORT']) {
+      const v = b.maxOrderUsdt?.[st]?.[side];
+      next.maxOrderUsdt[st][side] = v === '' || v == null ? null : n(v, { min: 1, max: 1e7 });
+    }
+    // multipliers / modes are NOT editable here (fixed ladder, max 1.25)
+    store.config.controller = next;
+    store.saveConfig();
+    log.info('Controller settings saved', 'CONFIG_SAVED', { reevalDays: next.reevalDays, minHistoryDays: next.minHistoryDays, guards: next.guards });
+    ok(res);
+  } catch (e) {
+    ok(res, { ok: false, msg: e.message });
+  }
+});
+
 // ---- API keys (stored locally in data/secrets.json, chmod 600; secret is never sent back)
 const mask = (k) => (k ? `${k.slice(0, 4)}${'•'.repeat(8)}${k.slice(-4)}` : '');
 app.get('/api/secrets', (req, res) => {
@@ -194,13 +256,13 @@ wss.on('connection', (ws, req) => {
   const origin = req.headers.origin;
   if (origin && new URL(origin).host !== req.headers.host) { ws.close(1008, 'origin'); return; }
   ws.send(JSON.stringify({ type: 'logs', data: log.recent(500) }));
-  ws.send(JSON.stringify({ type: 'snapshot', data: engine.snapshot() }));
+  ws.send(JSON.stringify({ type: 'snapshot', data: fullSnapshot() }));
 });
 const broadcast = (msg) => {
   const s = JSON.stringify(msg);
   for (const c of wss.clients) if (c.readyState === 1) c.send(s);
 };
-setInterval(() => { if (wss.clients.size) broadcast({ type: 'snapshot', data: engine.snapshot() }); }, 1000);
+setInterval(() => { if (wss.clients.size) broadcast({ type: 'snapshot', data: fullSnapshot() }); }, 1000);
 log.on('log', (e) => broadcast({ type: 'log', data: e }));
 const klineThrottle = new Map();
 md.on('kline', (k) => {
@@ -222,6 +284,7 @@ server.listen(PORT, HOST, async () => {
     try {
       await md.start();
       engine.evaluateAll('init');
+      controller.start();
       if (engine.mode === 'LIVE') engine.verifyLive(false);
     } catch (e) {
       log.error(`Market data init failed: ${e.message} — retrying in 15s`, 'API_ERROR');

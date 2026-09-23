@@ -232,3 +232,18 @@ input:focus, select:focus { outline: none; border-color: var(--info); }
 ::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-thumb { background: #2a313b; }
 ::-webkit-scrollbar-track { background: transparent; }
+
+/* controller */
+.ctl-bar { display: flex; align-items: center; gap: 12px; padding: 4px 8px; border-bottom: 1px solid var(--line); background: var(--panel); position: sticky; top: 0; z-index: 3; font-size: 11px; }
+.ctl-grid { display: grid; grid-template-columns: minmax(0, 1fr) 380px; min-width: 1200px; }
+.ctl-main { border-right: 1px solid var(--line); min-width: 0; overflow-x: auto; }
+.ctl-side { min-width: 0; }
+#ctlChart { height: 150px; position: relative; border-bottom: 1px solid var(--line); }
+.t td.reason { max-width: 420px; overflow: hidden; text-overflow: ellipsis; color: var(--dim); font-family: var(--sans); }
+.t tr.dim td { opacity: .45; }
+.ctl-set .fr { grid-template-columns: 1fr 150px; }
+.ctl-set .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
+.ctl-set .pair input { width: 100%; }
+.sub-h.warn { color: var(--warn); }
+#sumCtl { font-weight: 600; letter-spacing: .3px; margin-left: 8px; margin-right: auto; }
+#sumCtl .tag { font-size: 9.5px; }

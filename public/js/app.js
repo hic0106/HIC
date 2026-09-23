@@ -3,6 +3,7 @@ import { $, $$, esc, fUsd, fSigned, fPct, fNum, fPrice, fDur, fTime, fDateTime, 
 import { ChartView } from './chart.js';
 import { renderStrategiesTab } from './settings.js';
 import { confirmDialog, openApiModal } from './modals.js';
+import { mountController, unmountController, controllerHeaderHtml, statusTag } from './controller.js';
 
 const STRATS = ['TURTLE', 'ADX', 'TSMOM'];
 const SHORT = { TURTLE: 'TURTLE', ADX: 'ADX', TSMOM: 'TSMOM' };
@@ -50,6 +51,7 @@ function bindUi() {
     $$('#tabs button[data-tab]').forEach((x) => x.classList.toggle('on', x === b));
     $$('.tab-pane').forEach((p) => p.classList.toggle('on', p.id === `tab-${S.tab}`));
     if (S.tab === 'strategies') openStrategies();
+    if (S.tab === 'controller') mountController($('#tab-controller')); else unmountController();
     if (S.tab === 'log') { S.errCount = 0; updateErrBadge(); scrollLog(); }
     renderBottom();
   });
@@ -330,16 +332,26 @@ function renderOrderBook(m, f) {
 }
 
 function renderSummary(s) {
-  $('#sumMode').textContent = `${s.mode} amounts`;
+  $('#sumMode').textContent = `${s.mode} base → actual`;
+  $('#sumCtl').innerHTML = controllerHeaderHtml(s.controller);
+  const ctl = (st, side) => s.controller?.rows?.find((r) => r.strategy === st && r.side === side);
+  const ctlCell = (st, side) => {
+    const r = ctl(st, side);
+    if (!r || !r.active) return '<span class="muted">—</span>';
+    const applied = r.applied === 'NOT_APPLIED' || r.applied === 'OFF' ? null : r.applied;
+    return `${statusTag(r.recommended, r.recommendedMult)}${applied ? '' : ' <span class="muted">obs</span>'}`;
+  };
+  const amt = (base, actual) => (Math.abs(actual - base) < 1e-9 ? fNum(base, 0) : `${fNum(base, 0)}→<b class="warn">${fNum(actual, 0)}</b>`);
   const rows = s.strategies.map((x) => `<tr><td><b>${x.strategy}</b></td>
     <td class="${x.enabled ? 'up' : 'down'}">${x.enabled ? 'ON' : 'OFF'}</td>
-    <td>${fNum(x.longAmount, 0)}</td><td>${x.strategy === 'TSMOM' ? 'CASH' : x.shortEnabled ? fNum(x.shortAmount, 0) : 'OFF'}</td>
+    <td>${amt(x.longAmount, x.longActual)}</td><td>${x.strategy === 'TSMOM' ? 'CASH' : x.shortEnabled ? amt(x.shortAmount, x.shortActual) : 'OFF'}</td>
+    <td class="l">L ${ctlCell(x.strategy, 'LONG')}${x.strategy === 'TSMOM' ? '' : ` S ${ctlCell(x.strategy, 'SHORT')}`}</td>
     <td><span class="up">${x.longs}L</span> / <span class="down">${x.shorts}S</span></td>
     <td class="${cls(x.unrealized)}">${fSigned(x.unrealized)}</td><td class="${cls(x.realized)}">${fSigned(x.realized)}</td>
     <td>${x.trades}</td><td>${x.winRate != null ? x.winRate.toFixed(0) + '%' : '—'}</td></tr>`).join('');
   const tu = s.strategies.reduce((a, x) => a + x.unrealized, 0), tr = s.strategies.reduce((a, x) => a + x.realized, 0);
-  $('#stratSumTable').innerHTML = `<thead><tr><th>Strategy</th><th>State</th><th>Long Amt</th><th>Short Amt</th><th>Open</th><th>Unrealized</th><th>Realized</th><th>Trades</th><th>Win</th></tr></thead>
-    <tbody>${rows}</tbody><tfoot><tr><td>TOTAL</td><td></td><td></td><td></td><td>${s.positions.length}</td><td class="${cls(tu)}">${fSigned(tu)}</td><td class="${cls(tr)}">${fSigned(tr)}</td><td>${s.trades.length}</td><td></td></tr></tfoot>`;
+  $('#stratSumTable').innerHTML = `<thead><tr><th>Strategy</th><th>State</th><th>Long Amt</th><th>Short Amt</th><th class="l">Controller</th><th>Open</th><th>Unrealized</th><th>Realized</th><th>Trades</th><th>Win</th></tr></thead>
+    <tbody>${rows}</tbody><tfoot><tr><td>TOTAL</td><td></td><td></td><td></td><td></td><td>${s.positions.length}</td><td class="${cls(tu)}">${fSigned(tu)}</td><td class="${cls(tr)}">${fSigned(tr)}</td><td>${s.trades.length}</td><td></td></tr></tfoot>`;
   const a = s.account;
   $('#acctTable').innerHTML = [
     ['Wallet Balance', a.wallet != null ? fUsd(a.wallet) : '—'],
@@ -359,7 +371,11 @@ function renderBottom() {
   const openOrders = buildOpenOrders(s);
   $('#cntOrd').textContent = openOrders.filter((o) => o.status !== 'ACTIVE').length || openOrders.length;
   $('#cntTrd').textContent = s.trades.length;
-  $('#tabHint').textContent = S.tab === 'strategies' ? `Editing applies only on Save · current mode ${s.mode}` : '';
+  const cc = $('#cntCtl');
+  cc.textContent = s.controller?.pending || 0;
+  cc.classList.toggle('err', !!s.controller?.pending || !!s.controller?.failSafe);
+  cc.classList.toggle('has', !!s.controller?.pending || !!s.controller?.failSafe);
+  $('#tabHint').textContent = S.tab === 'strategies' ? `Editing applies only on Save · current mode ${s.mode}` : S.tab === 'controller' ? 'Controller sizes NEW entries only · signals / stops / leverage untouched' : '';
   if (S.tab === 'positions') renderPositions(s);
   else if (S.tab === 'orders') renderOrders(s, openOrders);
   else if (S.tab === 'trades') renderTrades(s);
@@ -371,7 +387,7 @@ function renderPositions(s) {
   const rows = s.positions.map((p) => `<tr data-sym="${p.symbol}">
     <td class="l"><b>${p.strategy}</b></td><td class="l">${p.symbol}</td><td class="l side-${p.side}">${p.side}</td>
     <td>${fPrice(p.entryPrice, f(p.symbol))}</td><td>${fPrice(p.markPrice, f(p.symbol))}</td>
-    <td>${fNum(p.orderAmount, 2)}</td><td>${p.qty}</td><td>${fNum(p.currentValue, 2)}</td>
+    <td>${fNum(p.orderAmount, 2)}${p.ctrlMultiplier != null && p.ctrlMultiplier !== 1 ? ` <span class="warn" title="base ${fNum(p.baseAmount, 2)} × controller ${p.ctrlMultiplier}">×${p.ctrlMultiplier}</span>` : ''}</td><td>${p.qty}</td><td>${fNum(p.currentValue, 2)}</td>
     <td class="${cls(p.pnl)}">${fSigned(p.pnl)}</td><td class="${cls(p.pnlPct)}">${fPct(p.pnlPct)}</td>
     <td class="down">${p.stopPrice ? fPrice(p.stopPrice, f(p.symbol)) : 'OFF'} ${exBadge(p)}</td><td class="muted">${p.stopDistPct != null ? p.stopDistPct.toFixed(2) + '%' : ''}</td>
     <td>${fNum(p.funding ? -p.funding : 0, 4)}</td><td>${fDur(p.holdingMs)}</td>

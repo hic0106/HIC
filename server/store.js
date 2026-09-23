@@ -26,6 +26,29 @@ export const DEFAULT_CONFIG = {
     exchangeStops: true, // LIVE: also place each emergency stop on Binance (STOP_MARKET, Algo API) so it works while the PC is off
     stopWorkingType: 'CONTRACT_PRICE', // trigger source for Binance stops: CONTRACT_PRICE (last) | MARK_PRICE
   },
+  // Self-Improving Controller (V1). Only scales base order amounts of NEW entries by a bounded multiplier.
+  controller: {
+    mode: 'OBSERVE', // OFF | OBSERVE | PAPER_AUTO | LIVE_APPROVAL
+    reevalDays: 7,
+    minHistoryDays: 90,
+    windows: { fast: 30, main: 90, stability: 180, extended: 365 },
+    lowTradeCountForExtended: 5, // < N trades in the stability window -> use the 365D window
+    multipliers: { PAUSED: 0, REDUCED: 0.5, CAUTIOUS: 0.75, NORMAL: 1, BOOSTED: 1.25 }, // hard max 1.25
+    weights: { return: 0.3, drawdown: 0.25, riskAdjusted: 0.3, consistency: 0.15 },
+    scale: { returnPct: 10, drawdownPct: 15, sharpe: 1.5, sortino: 2 },
+    thresholds: { boost: 0.5, normal: 0, cautious: -0.35 },
+    guards: {
+      noBoostDDPct: 10, reduceDDPct: 15, pauseDDPct: 25,
+      noBoostConsecLosses: 3, cautionConsecLosses: 5,
+      highVolCap: 'CAUTIOUS',
+      correlationThreshold: 0.85, correlationGuard: false,
+      maxCoinExposurePctForBoost: 50,
+    },
+    regime: { volHighPct: 80, atrHighPct: 6, adxTrend: 20, sidewaysRet30Pct: 5 },
+    boostRegimes: { LONG: ['BULL_TREND', 'NORMAL'], SHORT: ['BEAR_TREND'] },
+    // optional hard maximum USDT per order (null = none)
+    maxOrderUsdt: { TURTLE: { LONG: null, SHORT: null }, ADX: { LONG: null, SHORT: null }, TSMOM: { LONG: null, SHORT: null } },
+  },
   strategies: {
     TURTLE: {
       enabled: true,

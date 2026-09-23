@@ -78,6 +78,42 @@ Bot Running, Strategy Enabled, Short Enabled, 모드, 거래소 연결, 데이�
 - Trigger 가격 기준: `CONTRACT_PRICE`(최근 체결가, 기본) 또는 `MARK_PRICE` — Strategies › General에서 변경.
 - Binance Stop은 STOP ALL BOTS 후에도 거래소에 남아 있습니다.
 
+## Self-Improving Controller (V1)
+
+전략 위에 얹은 관리 계층입니다. **매매 신호를 만들지 않고**, 전략별·방향별로 신규 진입 주문금액의 배수만 정합니다.
+
+```
+Market Data → Turtle / ADX / TSMOM (기존 신호) → Controller (배수) → 기존 Execution Engine → Binance / Paper
+```
+
+- 실제 주문금액 = **Base Order Amount × Multiplier**. Base 금액은 Controller가 수정하지 않습니다.
+- Multiplier 고정 단계: PAUSED 0 · REDUCED 0.5 · CAUTIOUS 0.75 · NORMAL 1.0 · BOOSTED 1.25 (최대 1.25, 설정으로도 올릴 수 없음). 선택 사항으로 전략·방향별 최대 주문금액(USDT) 상한을 둘 수 있습니다.
+- Long / Short를 별도로 평가합니다(예: Turtle Long NORMAL, Turtle Short REDUCED).
+- 신규 진입에만 적용합니다. 청산, Stop, 레버리지, 전략 파라미터, Enabled 여부는 건드리지 않습니다.
+
+### 모드
+
+| 모드 | PAPER 주문 | LIVE 주문 |
+|---|---|---|
+| OFF | 1.00× | 1.00× |
+| **OBSERVE (기본)** | 1.00× (추천만 표시) | 1.00× |
+| PAPER AUTO | 추천 자동 적용 | 1.00× |
+| LIVE APPROVAL | 추천 자동 적용 | 사용자가 APPROVE한 변경만 적용 |
+
+`DISABLE CONTROLLER` 버튼은 모드를 OFF로 바꾸고 모든 배수를 1.00×로 되돌립니다. 전략은 계속 동작합니다. Controller 계산 오류 시 FAIL SAFE로 1.00×를 사용합니다.
+
+### 데이터와 평가
+
+- **Shadow Portfolio**: 기존 전략 신호(`strategies.evaluate`)와 같은 ATR Stop 규칙으로 가상 포지션을 운용합니다(주문 없음). 1.00× Baseline과 Controller 배수 적용 결과를 동시에 기록해 Controller가 실제로 도움이 되는지 비교합니다.
+- 성과 평가는 Baseline 가상 장부의 **일별 Mark-to-Market 곡선**을 씁니다. Controller 배수에 왜곡되지 않고, PAUSED 기간에도 데이터가 쌓여 회복을 판단할 수 있습니다.
+- 지표: 30/90/180일 수익률(거래가 적으면 365일), 현재/최대 Drawdown, Downside Volatility, Sharpe, Sortino, Profit Factor, 승률, 평균 손익, 거래 수, 노출일 비율, 연속 손실, 마지막 거래 후 경과일, 30일 구간 일관성.
+- Score = Return·Drawdown·Sharpe/Sortino·Consistency 정규화 점수의 가중합(가중치 설정 가능).
+- Guard: Drawdown 10%↑ BOOST 금지, 15%↑ 최대 REDUCED, 25%↑ PAUSED · 연속 손실 3회 BOOST 금지 · 30일 수익률이 음수면 배수 증가 금지 · 한 번에 한 단계만 상향 · 데이터 90일 미만은 NORMAL 유지.
+- Market Regime(BTC, 규칙 기반): BULL TREND / BEAR TREND / SIDEWAYS / HIGH VOLATILITY / NORMAL. HIGH VOLATILITY는 최대 0.75×, SIDEWAYS는 BOOST 금지, Long BOOST는 BULL/NORMAL에서만, Short BOOST는 BEAR에서만 허용합니다.
+- 전략 간 수익률 상관계수와 코인별 Gross Exposure를 계산해 표시합니다. 상관 Guard는 기본 OFF, 코인 노출이 Equity의 50%를 넘으면 해당 전략 BOOST를 막습니다.
+- 재평가 주기 기본 7일(1/7/14/30일 선택). 모든 결정은 사유와 함께 `data/controller-history.jsonl`에 저장됩니다.
+- 파라미터 자동 최적화는 V1에 없습니다(`ParameterCandidateManager`는 비활성 자리표시자).
+
 ## 알아둘 제한사항
 
 - PC가 꺼져 있으면 Binance Stop 외의 기능(신규 진입, 전략 Exit, Take Profit)은 동작하지 않습니다. 24시간 운용은 클라우드 서버에서 실행하세요.
@@ -103,6 +139,7 @@ server/indicators.js  SMA, ATR, ADX(Wilder), 채널, 로그 모멘텀
 server/marketData.js  REST 초기 로드 + WebSocket(/market, /public 경로)
 server/binance.js     REST 클라이언트(HMAC 서명), 필터/수량 처리
 server/store.js       설정·상태·키 저장(data/)
+server/controller/    Self-Improving Controller (engine, 성과 평가, Regime, 결정 규칙, 저장, Shadow Portfolio)
 public/               터미널 UI (lightweight-charts)
 tools/mock-binance.js 개발용 가짜 거래소
 ```

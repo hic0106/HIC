@@ -12,6 +12,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // Transient blocks: retried on next periodic evaluation within the same candle.
 const TRANSIENT = new Set(['ORDER_PENDING', 'DATA_DELAY', 'EXCHANGE_DISCONNECTED', 'NO_PRICE', 'BUSY', 'STOP_CANCEL_FAILED']);
+// Controller multipliers can never exceed this (defense in depth; controller enforces it too).
+const CONTROLLER_MAX_MULT = 1.25;
 // Exchange stop grace: when a bot-side stop breach is seen while the Binance stop is live, let Binance fill first.
 const EX_STOP_GRACE_MS = 15_000;
 
@@ -61,9 +63,32 @@ export class Engine {
     return ms.slots[k];
   }
 
+  // BASE ORDER AMOUNT set by the user. Never modified by the controller.
   amountFor(strategy, side, mode = this.mode) {
     const a = this.cfg.strategies[strategy].amounts[mode];
     return side === 'LONG' ? Number(a.long) : Number(a.short);
+  }
+
+  // Actual order amount = base × controller multiplier (0 … 1.25). Any controller error -> 1.00 (fail safe).
+  controllerSizing(strategy, side, base) {
+    let r = { multiplier: 1, status: 'OFF', capUsdt: null };
+    if (this.controller) {
+      try {
+        r = { ...r, ...this.controller.getSizing(strategy, side, this.mode) };
+      } catch (e) {
+        this.log.error(`Controller sizing error: ${e.message} — FAIL SAFE 1.00x`, 'CONTROLLER_FAIL_SAFE');
+        r = { multiplier: 1, status: 'FAIL_SAFE', capUsdt: null };
+      }
+    }
+    const m = Number(r.multiplier);
+    if (!Number.isFinite(m) || m < 0 || m > CONTROLLER_MAX_MULT) {
+      this.log.error(`Controller returned invalid multiplier ${r.multiplier} — FAIL SAFE 1.00x`, 'CONTROLLER_FAIL_SAFE');
+      r = { multiplier: 1, status: 'FAIL_SAFE', capUsdt: null };
+    }
+    let amount = base * r.multiplier;
+    if (r.capUsdt > 0) amount = Math.min(amount, r.capUsdt);
+    amount = Math.min(amount, base * CONTROLLER_MAX_MULT);
+    return { multiplier: r.multiplier, status: r.status, amount: round(amount, 8) };
   }
 
   // ---------- run control
@@ -340,8 +365,11 @@ export class Engine {
     }
     if (isExit) return { ok: true, price, filters: f };
 
-    const amount = this.amountFor(strategy, side);
-    if (!(amount > 0)) return fail('INVALID_AMOUNT', `${strategy} ${side} order amount not set`);
+    const baseAmount = this.amountFor(strategy, side);
+    if (!(baseAmount > 0)) return fail('INVALID_AMOUNT', `${strategy} ${side} order amount not set`);
+    const ctrl = this.controllerSizing(strategy, side, baseAmount);
+    if (ctrl.multiplier === 0) return fail('CONTROLLER_PAUSED', `${strategy} ${symbol} ${side}: controller status ${ctrl.status} (base ${baseAmount} × 0) — entry skipped`);
+    const amount = ctrl.amount;
     const qty = floorToStep(amount / price, f.stepSize);
     if (qty < f.minQty || qty <= 0) return fail('BELOW_MIN_QTY', `${symbol} qty ${qty} < minQty ${f.minQty} (amount ${amount} USDT)`);
     if (qty > f.maxQty) return fail('ABOVE_MAX_QTY', `${symbol} qty ${qty} > maxQty ${f.maxQty}`);
@@ -361,7 +389,7 @@ export class Engine {
     }
     const required = (notional / lev) * (1 + g.balanceBufferPct / 100) + notional * (g.takerFeePct / 100);
     if (available < required) return fail('INSUFFICIENT_BALANCE', `${strategy} ${symbol} ${side}: available ${available.toFixed(2)} < required ${required.toFixed(2)} USDT (order ${amount} USDT @${lev}x) — order skipped`);
-    return { ok: true, price, qty, notional, amount, filters: f, leverage: lev, available };
+    return { ok: true, price, qty, notional, amount, baseAmount, ctrl, filters: f, leverage: lev, available };
   }
 
   // ---------- open / close
@@ -376,10 +404,11 @@ export class Engine {
         if (!chk.transient) this.log.warn(`${tag} ${side} order skipped: ${chk.msg}`, chk.code);
         return chk;
       }
-      this.log.trade(`${tag} requested order: ${chk.amount} USDT → qty ${fmtQty(chk.qty, chk.filters.stepSize)} (≈${chk.notional.toFixed(2)} USDT) ${this.mode} ${chk.leverage}x`, 'ORDER_REQUEST');
+      const ctlNote = chk.ctrl.status === 'OFF' || chk.ctrl.status === 'NOT_APPLIED' ? '' : ` (base ${chk.baseAmount} × ${chk.ctrl.multiplier} controller ${chk.ctrl.status})`;
+      this.log.trade(`${tag} requested order: ${chk.amount} USDT${ctlNote} → qty ${fmtQty(chk.qty, chk.filters.stepSize)} (≈${chk.notional.toFixed(2)} USDT) ${this.mode} ${chk.leverage}x`, 'ORDER_REQUEST');
       const slot = this.slot(strategy, symbol);
       const order = this.newOrderRecord({ strategy, symbol, action: 'OPEN', side, qty: chk.qty, amount: chk.amount, refPrice: chk.price });
-      slot.pending = { clientOrderId: order.clientOrderId, action: 'OPEN', side, qty: chk.qty, amount: chk.amount, atr: sig?.atr ?? null, createdAt: Date.now(), notFound: 0 };
+      slot.pending = { clientOrderId: order.clientOrderId, action: 'OPEN', side, qty: chk.qty, amount: chk.amount, baseAmount: chk.baseAmount, ctrlMultiplier: chk.ctrl.multiplier, ctrlStatus: chk.ctrl.status, atr: sig?.atr ?? null, createdAt: Date.now(), notFound: 0 };
       slot.status = 'PENDING';
       this.store.saveStateNow(); // persist intent BEFORE sending (crash safety)
       return await this.execute(slot, order);
@@ -530,7 +559,7 @@ export class Engine {
       const tpPrice = scfg.takeProfit.enabled ? fill.avgPrice * (1 + dirOf(side) * scfg.takeProfit.pct / 100) : null;
       slot.position = {
         strategy: slot.strategy, symbol: slot.symbol, side, entryPrice: fill.avgPrice, qty: fill.executedQty,
-        orderAmount: pend.amount, entryNotional: fill.avgPrice * fill.executedQty, entryFee: fill.fee, funding: 0,
+        orderAmount: pend.amount, baseAmount: pend.baseAmount ?? pend.amount, ctrlMultiplier: pend.ctrlMultiplier ?? 1, ctrlStatus: pend.ctrlStatus ?? 'OFF', entryNotional: fill.avgPrice * fill.executedQty, entryFee: fill.fee, funding: 0,
         entryTime: Date.now(), stopPrice, stopPct: distPct, stopMode: scfg.stop.mode, tpPrice, atrAtEntry: pend.atr,
         leverage: Number(this.cfg.general.leverage), clientOrderId: order.clientOrderId,
       };
@@ -552,7 +581,7 @@ export class Engine {
         id: order.clientOrderId, mode: this.mode, strategy: slot.strategy, symbol: slot.symbol, side: pos.side,
         entryTime: pos.entryTime, exitTime: Date.now(), entryPrice: pos.entryPrice, exitPrice: fill.avgPrice, qty,
         orderAmount: pos.orderAmount * frac, entryNotional, grossPnl: gross, fee, funding: -funding, netPnl: net,
-        returnPct: (net / entryNotional) * 100, exitReason: pend.reason,
+        returnPct: (net / entryNotional) * 100, exitReason: pend.reason, ctrlMultiplier: pos.ctrlMultiplier ?? 1,
       };
       ms.trades.unshift(trade);
       if (ms.trades.length > 2000) ms.trades.length = 2000;
@@ -911,6 +940,8 @@ export class Engine {
       return {
         strategy: st, enabled: c.enabled, shortEnabled: c.shortEnabled && STRATEGY_META[st].supportsShort,
         longAmount: this.amountFor(st, 'LONG'), shortAmount: this.amountFor(st, 'SHORT'),
+        longActual: this.controllerSizing(st, 'LONG', this.amountFor(st, 'LONG')).amount,
+        shortActual: this.controllerSizing(st, 'SHORT', this.amountFor(st, 'SHORT')).amount,
         open: sp.length, longs: sp.filter((p) => p.side === 'LONG').length, shorts: sp.filter((p) => p.side === 'SHORT').length,
         unrealized: sp.reduce((a, p) => a + p.pnl, 0), realized: trades.reduce((a, t) => a + t.netPnl, 0),
         trades: trades.length, winRate: trades.length ? (wins / trades.length) * 100 : null,

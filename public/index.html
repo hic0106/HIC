@@ -76,7 +76,7 @@
     <div id="chartWrap"><div id="chart"></div><div id="chartMsg"></div></div>
     <div id="summary">
       <div class="sum-block">
-        <div class="panel-h">STRATEGY SUMMARY <span class="muted" id="sumMode"></span></div>
+        <div class="panel-h">STRATEGY SUMMARY <span id="sumCtl"></span><span class="muted" id="sumMode"></span></div>
         <table class="t compact" id="stratSumTable"></table>
       </div>
       <div class="sum-block narrow">
@@ -102,6 +102,7 @@
     <button data-tab="orders">Orders <b id="cntOrd">0</b></button>
     <button data-tab="trades">Trades <b id="cntTrd">0</b></button>
     <button data-tab="strategies">Strategies</button>
+    <button data-tab="controller">Controller <b id="cntCtl">0</b></button>
     <button data-tab="log">System Log <b id="cntErr" class="err">0</b></button>
     <div class="tabs-right">
       <span id="tabHint" class="muted"></span>
@@ -113,6 +114,7 @@
     <div class="tab-pane" id="tab-orders"></div>
     <div class="tab-pane" id="tab-trades"></div>
     <div class="tab-pane" id="tab-strategies"></div>
+    <div class="tab-pane" id="tab-controller"></div>
     <div class="tab-pane" id="tab-log">
       <div class="log-bar" id="logBar">
         <button data-f="ALL" class="on">ALL</button><button data-f="TRADE">TRADE</button><button data-f="WARN">WARN</button><button data-f="ERROR">ERROR</button>
