@@ -194,3 +194,112 @@ test('emergency stop triggers ATR_STOP exit', async () => {
   assert.equal(engine.ms().trades[0].exitReason, 'ATR_STOP');
   assert.ok(engine.ms().trades[0].netPnl < 0);
 });
+
+// ---------- exchange-side stops (Binance Algo STOP_MARKET)
+function liveEngineWithExchange() {
+  const { engine } = newEngine('LIVE');
+  engine.live = { ...engine.live, status: 'CONNECTED', hedgeMode: true, leverage: { BTCUSDT: 1, ETHUSDT: 1, XRPUSDT: 1 } };
+  const ex = { calls: [], algos: {}, orders: {}, exQty: {} };
+  let oid = 1;
+  engine.liveClient = {
+    hasKeys: () => true,
+    account: async () => ({ totalMarginBalance: '1000', totalWalletBalance: '1000', availableBalance: '1000', totalUnrealizedProfit: '0',
+      positions: Object.entries(ex.exQty).map(([k, q]) => ({ symbol: k.split(':')[0], positionSide: k.split(':')[1], positionAmt: String(q) })) }),
+    newOrder: async (p) => {
+      ex.calls.push(['order', p]);
+      const o = { status: 'FILLED', avgPrice: '100', executedQty: p.quantity, orderId: oid++, clientOrderId: p.newClientOrderId };
+      ex.orders[p.newClientOrderId] = o;
+      const k = `${p.symbol}:${p.positionSide}`;
+      const opening = (p.side === 'BUY') === (p.positionSide === 'LONG');
+      ex.exQty[k] = (ex.exQty[k] || 0) + (opening ? 1 : -1) * Number(p.quantity);
+      return o;
+    },
+    queryOrder: async (sym, id) => { if (ex.orders[id]) return ex.orders[id]; throw new BinanceError('HTTP 400 -2013', { code: -2013, status: 400, definitive: true }); },
+    userTrades: async () => [],
+    newAlgoOrder: async (p) => { ex.calls.push(['algo', p]); ex.algos[p.clientAlgoId] = { ...p, algoId: oid++, algoStatus: 'NEW' }; return ex.algos[p.clientAlgoId]; },
+    cancelAlgoOrder: async (id) => {
+      ex.calls.push(['cancel', id]);
+      if (ex.algos[id]?.algoStatus !== 'NEW') throw new BinanceError('HTTP 400 -2011 Unknown order sent.', { code: -2011, status: 400, definitive: true });
+      ex.algos[id].algoStatus = 'CANCELED';
+      return { code: '200' };
+    },
+    openAlgoOrders: async (sym) => Object.values(ex.algos).filter((a) => a.symbol === sym && a.algoStatus === 'NEW'),
+  };
+  // simulate Binance triggering a stop: algo finishes and a regular order with the same client id is filled
+  ex.trigger = (id, price = '90') => {
+    const a = ex.algos[id];
+    a.algoStatus = 'FINISHED';
+    ex.orders[id] = { status: 'FILLED', avgPrice: price, executedQty: a.quantity, orderId: oid++, clientOrderId: id };
+    ex.exQty[`${a.symbol}:${a.positionSide}`] -= Number(a.quantity);
+  };
+  return { engine, ex };
+}
+
+test('live: entry places Binance STOP_MARKET with hedge positionSide', async () => {
+  const { engine, ex } = liveEngineWithExchange();
+  assert.equal((await engine.openPosition('TURTLE', 'BTCUSDT', 'LONG', { atr: 1 })).ok, true);
+  const pos = engine.slot('TURTLE', 'BTCUSDT').position;
+  const algo = ex.calls.find((c) => c[0] === 'algo')[1];
+  assert.equal(algo.type, 'STOP_MARKET');
+  assert.equal(algo.side, 'SELL');
+  assert.equal(algo.positionSide, 'LONG');
+  assert.equal(Number(algo.triggerPrice), pos.stopPrice);
+  assert.equal(algo.reduceOnly, undefined, 'reduceOnly cannot be sent in hedge mode');
+  assert.equal(pos.exStop.status, 'NEW');
+});
+
+test('live: bot close cancels Binance stop before market order', async () => {
+  const { engine, ex } = liveEngineWithExchange();
+  await engine.openPosition('ADX', 'ETHUSDT', 'SHORT', { atr: 1 });
+  assert.equal((await engine.closePosition('ADX', 'ETHUSDT', 'STRATEGY_EXIT')).ok, true);
+  const kinds = ex.calls.map((c) => c[0]);
+  assert.deepEqual(kinds, ['order', 'algo', 'cancel', 'order']);
+  assert.equal(engine.ms().trades[0].exitReason, 'STRATEGY_EXIT');
+});
+
+test('live: stop filled on Binance while bot was away is recorded, not re-closed', async () => {
+  const { engine, ex } = liveEngineWithExchange();
+  await engine.openPosition('TSMOM', 'XRPUSDT', 'LONG', { atr: 1 });
+  const id = engine.slot('TSMOM', 'XRPUSDT').position.exStop.clientAlgoId;
+  ex.trigger(id, '85');
+  await engine.refreshLiveAccount();
+  await engine.syncExchangeStops();
+  const slot = engine.slot('TSMOM', 'XRPUSDT');
+  assert.equal(slot.position, null);
+  const t = engine.ms().trades[0];
+  assert.equal(t.exitReason, 'ATR_STOP');
+  assert.equal(t.exitPrice, 85);
+  assert.equal(ex.calls.filter((c) => c[0] === 'order').length, 1, 'no extra market close');
+  assert.equal(slot.block.LONG, true);
+});
+
+test('live: close racing a triggered stop records the stop fill only', async () => {
+  const { engine, ex } = liveEngineWithExchange();
+  await engine.openPosition('TURTLE', 'ETHUSDT', 'LONG', { atr: 1 });
+  ex.trigger(engine.slot('TURTLE', 'ETHUSDT').position.exStop.clientAlgoId, '88');
+  const r = await engine.closePosition('TURTLE', 'ETHUSDT', 'MANUAL_EXIT');
+  assert.equal(r.ok, true);
+  assert.equal(engine.ms().trades[0].exitReason, 'ATR_STOP');
+  assert.equal(ex.calls.filter((c) => c[0] === 'order').length, 1);
+});
+
+test('live: missing Binance stop is re-placed only if exchange holds the position', async () => {
+  const { engine, ex } = liveEngineWithExchange();
+  await engine.openPosition('ADX', 'BTCUSDT', 'LONG', { atr: 1 });
+  const first = engine.slot('ADX', 'BTCUSDT').position.exStop.clientAlgoId;
+  ex.algos[first].algoStatus = 'CANCELED'; // e.g. canceled manually in the Binance app
+  await engine.refreshLiveAccount();
+  await engine.syncExchangeStops();
+  await engine.syncExchangeStops();
+  const pos = engine.slot('ADX', 'BTCUSDT').position;
+  assert.notEqual(pos.exStop.clientAlgoId, first);
+  assert.equal(pos.exStop.status, 'NEW');
+  // exchange position gone (closed manually) -> do not place
+  ex.algos[pos.exStop.clientAlgoId].algoStatus = 'CANCELED';
+  ex.exQty['BTCUSDT:LONG'] = 0;
+  await engine.refreshLiveAccount();
+  const before = ex.calls.filter((c) => c[0] === 'algo').length;
+  await engine.syncExchangeStops();
+  await engine.syncExchangeStops();
+  assert.equal(ex.calls.filter((c) => c[0] === 'algo').length, before);
+});

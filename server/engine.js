@@ -1,6 +1,6 @@
 // Trading engine: strategy evaluation, pre-trade checks, paper/live execution,
 // emergency stops, funding, PnL accounting and UI snapshot.
-import { BinanceClient, BinanceError, endpoints, floorToStep, fmtQty } from './binance.js';
+import { BinanceClient, BinanceError, endpoints, floorToStep, fmtQty, roundToTick, fmtPrice } from './binance.js';
 import { STRATEGIES, STRATEGY_META, evaluate, stopDistancePct } from './strategies.js';
 import { SYMBOLS, emptyModeState } from './store.js';
 
@@ -11,7 +11,9 @@ const round = (x, d = 8) => (x == null || !isFinite(x) ? x : Number(x.toFixed(d)
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // Transient blocks: retried on next periodic evaluation within the same candle.
-const TRANSIENT = new Set(['ORDER_PENDING', 'DATA_DELAY', 'EXCHANGE_DISCONNECTED', 'NO_PRICE', 'BUSY']);
+const TRANSIENT = new Set(['ORDER_PENDING', 'DATA_DELAY', 'EXCHANGE_DISCONNECTED', 'NO_PRICE', 'BUSY', 'STOP_CANCEL_FAILED']);
+// Exchange stop grace: when a bot-side stop breach is seen while the Binance stop is live, let Binance fill first.
+const EX_STOP_GRACE_MS = 15_000;
 
 export class Engine {
   constructor(store, market, logger) {
@@ -197,6 +199,7 @@ export class Engine {
       this.live.error = e.message;
     }
     await this.resolveUnknownOrders();
+    await this.syncExchangeStops();
   }
 
   checkPositionMismatch() {
@@ -398,6 +401,14 @@ export class Engine {
         this.log.error(`${tag} close (${reason}) blocked: ${chk.msg}`, chk.code);
         return chk;
       }
+      if (this.mode === 'LIVE' && slot.position.exStop) {
+        const c = await this.cancelExchangeStop(slot);
+        if (c.triggered) return { ok: true, msg: 'exchange stop already filled' };
+        if (!c.ok) {
+          this.log.error(`${tag} close (${reason}) deferred: exchange stop cancel failed (${c.msg})`, 'STOP_CANCEL_FAILED');
+          return { ok: false, code: 'STOP_CANCEL_FAILED', transient: true, msg: c.msg };
+        }
+      }
       const pos = slot.position;
       this.log.trade(`${tag} closing ${pos.side} qty ${pos.qty} reason ${reason}`, 'ORDER_REQUEST');
       const order = this.newOrderRecord({ strategy, symbol, action: 'CLOSE', side: pos.side, qty: pos.qty, amount: round(pos.qty * chk.price, 2), refPrice: chk.price, reason });
@@ -456,6 +467,7 @@ export class Engine {
       this.log.trade(`${tag} order filled ${order.side} ${fill.executedQty} @ ${fill.avgPrice} fee ${fill.fee.toFixed(4)}`, 'ORDER_FILLED');
     }
     this.applyFill(slot, order, fill);
+    if (this.mode === 'LIVE' && slot.position && !slot.position.exStop) await this.placeExchangeStop(slot);
     return { ok: true };
   }
 
@@ -513,7 +525,8 @@ export class Engine {
     if (pend.action === 'OPEN') {
       const side = pend.side;
       const distPct = stopDistancePct(scfg.stop, pend.atr, fill.avgPrice);
-      const stopPrice = distPct == null ? null : fill.avgPrice * (1 - dirOf(side) * distPct / 100);
+      const tick = this.md.filters[slot.symbol]?.tickSize || 0;
+      const stopPrice = distPct == null ? null : roundToTick(fill.avgPrice * (1 - dirOf(side) * distPct / 100), tick);
       const tpPrice = scfg.takeProfit.enabled ? fill.avgPrice * (1 + dirOf(side) * scfg.takeProfit.pct / 100) : null;
       slot.position = {
         strategy: slot.strategy, symbol: slot.symbol, side, entryPrice: fill.avgPrice, qty: fill.executedQty,
@@ -548,6 +561,7 @@ export class Engine {
       this.log.trade(`${tag} ${pos.side} closed @ ${fill.avgPrice} (${pend.reason}) net ${net >= 0 ? '+' : ''}${net.toFixed(2)} USDT (${trade.returnPct.toFixed(2)}%)`, 'POSITION_CLOSED');
       if (qty < pos.qty - 1e-12) {
         pos.qty -= qty; pos.entryFee -= entryFee; pos.funding -= funding; pos.entryNotional -= entryNotional; pos.orderAmount -= trade.orderAmount;
+        if (pos.exStop) pos.exStop = { ...pos.exStop, status: 'REPLACE' };
         slot.status = pos.side;
         this.log.warn(`${tag} partial close: remaining qty ${pos.qty}`, 'PARTIAL_FILL');
       } else {
@@ -580,6 +594,7 @@ export class Engine {
         if (fill.pending) continue;
         this.log.warn(`${tag} unknown order resolved: ${r.status} qty ${fill.executedQty}`, 'ORDER_RESOLVED');
         this.applyFill(slot, order, fill);
+        if (slot.position && !slot.position.exStop) await this.placeExchangeStop(slot);
       } catch (e) {
         if (e.code === -2013) {
           p.notFound = (p.notFound || 0) + 1;
@@ -619,15 +634,187 @@ export class Engine {
       const d = dirOf(pos.side);
       if (pos.stopPrice != null && (price - pos.stopPrice) * d <= 0) {
         const reason = pos.stopMode === 'FIXED_PERCENT' ? 'FIXED_STOP' : 'ATR_STOP';
+        if (this.mode === 'LIVE' && pos.exStop?.status === 'NEW') {
+          // Binance holds the stop: give it time to fill, then fall back to a bot market close.
+          pos.breachAt ||= now;
+          if (now - pos.breachAt < EX_STOP_GRACE_MS) { this.syncExchangeStops(true); continue; }
+          this.log.warn(`${st} ${symbol.replace('USDT', '')} exchange stop not filled ${EX_STOP_GRACE_MS / 1000}s after breach — bot fallback close`, 'STOP_FALLBACK');
+        }
         slot.lastStopTry = now;
         this.log.warn(`${st} ${symbol.replace('USDT', '')} ${pos.side} EMERGENCY STOP hit: price ${price} vs stop ${pos.stopPrice.toPrecision(6)}`, reason);
         this.closePosition(st, symbol, reason);
       } else if (pos.tpPrice != null && (price - pos.tpPrice) * d >= 0) {
+        pos.breachAt = null;
         slot.lastStopTry = now;
         this.log.trade(`${st} ${symbol.replace('USDT', '')} TAKE PROFIT hit @ ${price}`, 'TAKE_PROFIT');
         this.closePosition(st, symbol, 'TAKE_PROFIT');
+      } else {
+        pos.breachAt = null;
       }
     }
+  }
+
+  // ---------- exchange-side emergency stops (LIVE, Binance Algo STOP_MARKET)
+  exchangeStopsEnabled() { return this.mode === 'LIVE' && this.cfg.general.exchangeStops; }
+
+  async placeExchangeStop(slot) {
+    const pos = slot.position;
+    if (!this.exchangeStopsEnabled() || !pos?.stopPrice) return;
+    if (pos.exStop && ['NEW', 'PLACING', 'UNKNOWN', 'TRIGGERED'].includes(pos.exStop.status)) return;
+    const f = this.md.filters[slot.symbol];
+    const tag = `${slot.strategy} ${slot.symbol.replace('USDT', '')}`;
+    const clientAlgoId = `HIC-X${STRATEGY_META[slot.strategy].short}${slot.symbol.slice(0, 3)}${pos.side[0]}-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`;
+    const params = {
+      symbol: slot.symbol, side: pos.side === 'LONG' ? 'SELL' : 'BUY', positionSide: pos.side, type: 'STOP_MARKET',
+      quantity: fmtQty(pos.qty, f.stepSize), triggerPrice: fmtPrice(pos.stopPrice, f.tickSize),
+      workingType: this.cfg.general.stopWorkingType, clientAlgoId,
+    };
+    pos.exStop = { clientAlgoId, algoId: null, status: 'PLACING', triggerPrice: pos.stopPrice, qty: pos.qty, placedAt: Date.now(), missing: 0 };
+    this.store.saveStateNow(); // persist id before sending
+    try {
+      const r = await this.liveClient.newAlgoOrder(params);
+      pos.exStop = { ...pos.exStop, status: 'NEW', algoId: r.algoId ?? null };
+      this.log.trade(`${tag} Binance STOP_MARKET placed @ ${params.triggerPrice} qty ${params.quantity} (${params.workingType}, ${clientAlgoId})`, 'EXCHANGE_STOP');
+    } catch (e) {
+      if (e instanceof BinanceError && e.definitive) {
+        pos.exStop = { ...pos.exStop, status: 'FAILED', error: e.message, failedAt: Date.now() };
+        this.log.error(`${tag} Binance stop order REJECTED: ${e.message} — bot-side stop remains active`, 'EXCHANGE_STOP_FAILED');
+      } else {
+        pos.exStop = { ...pos.exStop, status: 'UNKNOWN', error: e.message };
+        this.log.error(`${tag} Binance stop order result UNKNOWN (${e.message}) — will verify via open algo orders`, 'EXCHANGE_STOP_UNKNOWN');
+      }
+    }
+    this.store.saveStateNow();
+  }
+
+  // Cancels the exchange stop before a bot-initiated close.
+  // Returns { ok } | { ok:false, msg } | { triggered:true } (stop already filled -> recorded as stop exit).
+  async cancelExchangeStop(slot) {
+    const ex = slot.position.exStop;
+    const tag = `${slot.strategy} ${slot.symbol.replace('USDT', '')}`;
+    if (['FAILED', 'CANCELED'].includes(ex.status)) { slot.position.exStop = null; return { ok: true }; }
+    try {
+      await this.liveClient.cancelAlgoOrder(ex.clientAlgoId);
+      this.log.info(`${tag} Binance stop canceled (${ex.clientAlgoId})`, 'EXCHANGE_STOP');
+      slot.position.exStop = null;
+      this.store.saveStateNow();
+      return { ok: true };
+    } catch (e) {
+      if (!(e instanceof BinanceError && e.definitive)) return { ok: false, msg: e.message };
+      // Rejected cancel: stop may have triggered already, or never existed.
+      const st = await this.checkTriggeredStop(slot);
+      if (st === 'FILLED') return { triggered: true };
+      if (st === 'WORKING') return { ok: false, msg: 'exchange stop is executing' };
+      if (st === 'ERROR') return { ok: false, msg: 'stop state unknown' };
+      slot.position.exStop = null; // not found anywhere -> safe to close with market order
+      return { ok: true };
+    }
+  }
+
+  // Looks up the regular order created when the algo stop triggered (same clientOrderId).
+  // Returns FILLED (and records the exit) | WORKING | NONE | ERROR
+  async checkTriggeredStop(slot) {
+    const pos = slot.position;
+    const ex = pos.exStop;
+    let r;
+    try {
+      r = await this.liveClient.queryOrder(slot.symbol, ex.clientAlgoId);
+    } catch (e) {
+      return e.code === -2013 ? 'NONE' : 'ERROR';
+    }
+    const executed = Number(r.executedQty || 0);
+    const terminal = ['FILLED', 'CANCELED', 'EXPIRED', 'REJECTED', 'EXPIRED_IN_MATCH'].includes(r.status);
+    if (!terminal) return 'WORKING';
+    if (executed <= 0) return 'NONE';
+    const reason = pos.stopMode === 'FIXED_PERCENT' ? 'FIXED_STOP' : 'ATR_STOP';
+    const ms = this.ms('LIVE');
+    const order = { id: ex.clientAlgoId, clientOrderId: ex.clientAlgoId, time: Date.now(), mode: 'LIVE', strategy: slot.strategy, symbol: slot.symbol, action: 'CLOSE', positionSide: pos.side, side: pos.side === 'LONG' ? 'SELL' : 'BUY', type: 'STOP_MARKET', refPrice: ex.triggerPrice, price: null, amount: round(executed * Number(r.avgPrice || ex.triggerPrice), 2), qty: executed, status: 'SUBMITTED', reason, exchangeOrderId: r.orderId, fee: null };
+    ms.orders.unshift(order);
+    const fill = await this.fillFromOrder(order, r);
+    slot.pending = { clientOrderId: ex.clientAlgoId, action: 'CLOSE', side: pos.side, qty: pos.qty, reason, createdAt: Date.now(), notFound: 0 };
+    pos.exStop = null;
+    this.log.warn(`${slot.strategy} ${slot.symbol.replace('USDT', '')} Binance STOP_MARKET filled @ ${fill.avgPrice} qty ${fill.executedQty}`, reason);
+    this.applyFill(slot, order, fill);
+    return 'FILLED';
+  }
+
+  async syncExchangeStops(soon = false) {
+    if (!this.exchangeStopsEnabled() || this.live.status !== 'CONNECTED' || this._syncing) return;
+    if (soon && Date.now() - (this._lastStopSync || 0) < 3000) return;
+    this._syncing = true;
+    this._lastStopSync = Date.now();
+    try {
+      const openBySym = {};
+      for (const slot of Object.values(this.ms('LIVE').slots)) {
+        const pos = slot.position;
+        const key = slotKey(slot.strategy, slot.symbol);
+        if (!pos || !pos.stopPrice || slot.pending || this.busy.has(key)) continue;
+        this.busy.add(key);
+        try {
+          await this.syncOneStop(slot, openBySym);
+        } catch (e) {
+          this.log.warn(`${slot.strategy} ${slot.symbol} stop sync error: ${e.message}`, 'API_ERROR');
+        } finally {
+          this.busy.delete(key);
+        }
+      }
+    } finally {
+      this._syncing = false;
+    }
+  }
+
+  async syncOneStop(slot, openBySym) {
+    const pos = slot.position;
+    const ex = pos.exStop;
+    const tag = `${slot.strategy} ${slot.symbol.replace('USDT', '')}`;
+    if (!ex) return this.placeIfExchangeHasPosition(slot);
+    if (ex.status === 'FAILED') {
+      if (Date.now() - (ex.failedAt || 0) > 60_000) { pos.exStop = null; return this.placeIfExchangeHasPosition(slot); }
+      return;
+    }
+    if (ex.status === 'REPLACE') {
+      const c = await this.cancelExchangeStop(slot);
+      if (c.ok && !c.triggered) return this.placeIfExchangeHasPosition(slot);
+      return;
+    }
+    openBySym[slot.symbol] ||= await this.liveClient.openAlgoOrders(slot.symbol);
+    const list = Array.isArray(openBySym[slot.symbol]) ? openBySym[slot.symbol] : (openBySym[slot.symbol]?.orders || []);
+    const found = list.find((o) => o.clientAlgoId === ex.clientAlgoId);
+    if (found) {
+      if (ex.status !== 'NEW') this.log.info(`${tag} Binance stop confirmed open (${found.algoStatus || 'NEW'})`, 'EXCHANGE_STOP');
+      pos.exStop = { ...ex, status: 'NEW', algoId: found.algoId ?? ex.algoId, missing: 0 };
+      return;
+    }
+    if (ex.status === 'PLACING' && Date.now() - ex.placedAt < 10_000) return;
+    const st = await this.checkTriggeredStop(slot);
+    if (st === 'FILLED' || st === 'ERROR') return;
+    if (st === 'WORKING') { pos.exStop = { ...ex, status: 'TRIGGERED' }; return; }
+    pos.exStop = { ...ex, missing: (ex.missing || 0) + 1 };
+    if (pos.exStop.missing >= 2) {
+      this.log.warn(`${tag} Binance stop ${ex.clientAlgoId} not found (canceled/expired/rejected on exchange) — re-placing`, 'EXCHANGE_STOP_MISSING');
+      pos.exStop = null;
+      await this.placeIfExchangeHasPosition(slot);
+    }
+    this.store.saveState();
+  }
+
+  // Never place a stop for quantity the exchange position does not have.
+  async placeIfExchangeHasPosition(slot) {
+    const pos = slot.position;
+    const exPos = this.live.exchangePositions;
+    if (exPos) {
+      const p = exPos.find((x) => x.symbol === slot.symbol && x.positionSide === pos.side);
+      const exQty = p ? Math.abs(Number(p.positionAmt)) : 0;
+      if (exQty + 1e-12 < pos.qty) {
+        const k = `nostop:${slot.strategy}:${slot.symbol}`;
+        if (!this._nostop?.[k] || Date.now() - this._nostop[k] > 300_000) {
+          (this._nostop ||= {})[k] = Date.now();
+          this.log.error(`${slot.strategy} ${slot.symbol} exchange ${pos.side} qty ${exQty} < bot qty ${pos.qty} — Binance stop not placed (check POSITION_MISMATCH)`, 'POSITION_MISMATCH');
+        }
+        return;
+      }
+    }
+    await this.placeExchangeStop(slot);
   }
 
   onFunding({ symbol, time, rate, markPrice }) {

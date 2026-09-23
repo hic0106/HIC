@@ -68,9 +68,20 @@ Bot Running, Strategy Enabled, Short Enabled, 모드, 거래소 연결, 데이�
 - STOP ALL BOTS: 전략 실행과 신규 진입 중단. 기존 포지션은 청산하지 않습니다. Emergency Stop은 기본적으로 계속 동작합니다(Strategies › General › `Emergency Stops when STOPPED`로 끌 수 있음).
 - CLOSE ALL POSITIONS: 현재 모드의 봇 포지션 전체를 시장가 청산(Exit Reason `EMERGENCY_CLOSE`), `CLOSE ALL` 입력 확인 필요.
 
+### Binance Stop 주문 (LIVE, 기본 ON)
+
+- LIVE 진입 체결 직후 해당 전략 포지션의 수량·Stop 가격으로 Binance에 `STOP_MARKET`(Algo Order API `/fapi/v1/algoOrder`, Hedge Mode `positionSide`)을 등록합니다. **PC나 프로그램이 꺼져 있어도 Binance가 손절을 실행합니다.**
+- 봇이 청산(전략 Exit, 수동, CLOSE ALL, Take Profit)할 때는 Binance Stop을 **먼저 취소**한 뒤 시장가 주문을 보냅니다. 취소 결과가 불확실하면 청산을 보류하고 재시도합니다(이중 청산 방지).
+- 프로그램이 꺼진 동안 Stop이 체결되었다면, 재시작 후 동기화에서 체결 내역(같은 clientOrderId)을 찾아 `ATR_STOP` 거래로 기록합니다.
+- 10초마다 Binance의 열린 Algo 주문과 비교합니다. Stop이 사라졌으면(앱에서 수동 취소 등) 거래소 포지션 수량을 확인한 뒤 다시 등록합니다.
+- 봇 내부 Stop 감시는 백업으로 유지됩니다. Binance Stop이 살아 있으면 가격 이탈 후 15초 동안 Binance 체결을 기다리고, 그래도 포지션이 남아 있으면 봇이 직접 청산합니다.
+- Trigger 가격 기준: `CONTRACT_PRICE`(최근 체결가, 기본) 또는 `MARK_PRICE` — Strategies › General에서 변경.
+- Binance Stop은 STOP ALL BOTS 후에도 거래소에 남아 있습니다.
+
 ## 알아둘 제한사항
 
-- Emergency Stop은 **프로그램 내부에서 감시 후 시장가 청산**합니다. 거래소에 Stop 주문을 걸어두지 않으므로 프로그램/PC가 꺼져 있으면 Stop이 동작하지 않습니다.
+- PC가 꺼져 있으면 Binance Stop 외의 기능(신규 진입, 전략 Exit, Take Profit)은 동작하지 않습니다. 24시간 운용은 클라우드 서버에서 실행하세요.
+- Take Profit은 Binance에 등록하지 않고 봇이 감시합니다.
 - 계정에 수동으로 연 포지션이 같은 코인/방향에 있으면 Hedge Mode 포지션이 합쳐지므로 봇 전용 계정(서브계정) 사용을 권장합니다.
 - LIVE Funding Fee는 마크가격 스트림 기준 계산값입니다(실제 차감액과 소수점 차이 가능).
 

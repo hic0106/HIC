@@ -97,6 +97,9 @@ function generalCol(g) {
     <div class="fr"><label>Live Base Capital</label>${numIn('liveBaseCapital', g.liveBaseCapital ?? '', 1, 'min="1" placeholder="auto"')}</div>
     <div class="note">Total Return % = Total PnL / Base Capital. LIVE 값이 비어 있으면 최초 연결 시 계좌 Equity로 자동 설정.</div>
     <div class="set-sec">Safety</div>
+    <div class="fr"><label>Binance Stop Orders (LIVE)</label><span>${sw('exchangeStops', g.exchangeStops)}</span></div>
+    <div class="fr" data-dep="exchangeStops"><label>Stop Trigger Price</label><select name="stopWorkingType">${['CONTRACT_PRICE', 'MARK_PRICE'].map((m) => `<option ${m === g.stopWorkingType ? 'selected' : ''}>${m}</option>`).join('')}</select></div>
+    <div class="note">ON이면 LIVE 진입 직후 Binance에 STOP_MARKET을 등록해 PC/프로그램이 꺼져도 손절이 실행됩니다. 봇이 청산할 때는 이 주문을 먼저 취소합니다. CONTRACT_PRICE = 최근 체결가, MARK_PRICE = 마크가격.</div>
     <div class="fr"><label>Emergency Stops when STOPPED</label><span>${sw('stopsActiveWhenStopped', g.stopsActiveWhenStopped, ['ACTIVE', 'OFF'])}</span></div>
     <div class="fr"><label>Data Delay Limit (sec)</label>${numIn('dataStaleSec', g.dataStaleSec, 1, 'min="5"')}</div>
     <div class="fr"><label>Balance Buffer %</label>${numIn('balanceBufferPct', g.balanceBufferPct, 0.5, 'min="0"')}</div>

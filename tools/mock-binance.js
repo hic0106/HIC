@@ -108,6 +108,22 @@ const server = http.createServer((req, res) => {
     const o = acct.orders[q.origClientOrderId];
     return o ? json(res, 200, o) : json(res, 400, { code: -2013, msg: 'Order does not exist.' });
   }
+  if (p === '/fapi/v1/algoOrder' && req.method === 'POST') {
+    if (q.algoType !== 'CONDITIONAL' || q.type !== 'STOP_MARKET' || !q.triggerPrice || !q.positionSide) return json(res, 400, { code: -1102, msg: 'bad algo params' });
+    if (process.env.MOCK_FAIL === 'algo') return json(res, 400, { code: -2021, msg: 'Order would immediately trigger.' });
+    const a = { algoId: ++oid, clientAlgoId: q.clientAlgoId, algoType: 'CONDITIONAL', orderType: q.type, symbol: q.symbol, side: q.side, positionSide: q.positionSide, quantity: q.quantity, triggerPrice: q.triggerPrice, workingType: q.workingType || 'CONTRACT_PRICE', algoStatus: 'NEW', createTime: Date.now() };
+    algos[q.clientAlgoId] = a;
+    return json(res, 200, a);
+  }
+  if (p === '/fapi/v1/algoOrder' && req.method === 'DELETE') {
+    const a = algos[q.clientAlgoId];
+    if (!a || a.algoStatus !== 'NEW') return json(res, 400, { code: -2011, msg: 'Unknown order sent.' });
+    a.algoStatus = 'CANCELED';
+    return json(res, 200, { algoId: a.algoId, clientAlgoId: a.clientAlgoId, code: '200', msg: 'success' });
+  }
+  if (p === '/fapi/v1/openAlgoOrders') return json(res, 200, Object.values(algos).filter((a) => a.algoStatus === 'NEW' && (!q.symbol || a.symbol === q.symbol)));
+  if (p === '/mock/algos') return json(res, 200, algos);
+  if (p === '/mock/price') { hist[q.symbol].price *= Number(q.mul); return json(res, 200, { price: hist[q.symbol].price }); } // dev: shift price
   if (p === '/fapi/v1/userTrades') {
     const o = Object.values(acct.orders).find((x) => String(x.orderId) === q.orderId);
     return json(res, 200, o ? [{ commission: String(o.executedQty * o.avgPrice * 0.0005), commissionAsset: 'USDT' }] : []);
@@ -116,6 +132,7 @@ const server = http.createServer((req, res) => {
 });
 
 let oid = 1000;
+const algos = {};
 function fillOrder(q) {
   const s = q.symbol, qty = Number(q.quantity), px = hist[s].price;
   const k = posKey(s, q.positionSide);
@@ -152,6 +169,16 @@ setInterval(() => {
     }
     const dt = 0.5 / (DAY / 1000);
     h.price *= Math.exp(c.vol * Math.sqrt(dt) * gauss() * (DAY < 86_400_000 ? 1 : 3) + Math.sin(now / DAY / 7) * 0.02 * dt);
+    for (const a of Object.values(algos)) {
+      if (a.symbol !== s || a.algoStatus !== 'NEW') continue;
+      const px = a.workingType === 'MARK_PRICE' ? h.price * 1.0001 : h.price;
+      const hit = a.side === 'SELL' ? px <= Number(a.triggerPrice) : px >= Number(a.triggerPrice);
+      if (!hit) continue;
+      const o = fillOrder({ symbol: s, side: a.side, positionSide: a.positionSide, quantity: a.quantity, newClientOrderId: a.clientAlgoId });
+      a.algoStatus = o.error ? 'REJECTED' : 'FINISHED';
+      if (!o.error) acct.orders[a.clientAlgoId] = { ...o, type: 'MARKET', origType: 'STOP_MARKET' };
+      console.log(`algo ${a.clientAlgoId} triggered @ ${px} -> ${a.algoStatus}`);
+    }
     const fm = h.forming;
     fm.c = h.price; fm.h = Math.max(fm.h, h.price); fm.l = Math.min(fm.l, h.price); fm.v += rnd() * 5;
     for (const [iv, ms] of Object.entries(INTERVALS)) {

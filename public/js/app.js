@@ -305,7 +305,7 @@ function stratCard(s, st, sym, f) {
   }
   if (!p && sl.pending == null) add('Exit Rule', sl.exitRule);
   const notes = [];
-  if (p) notes.push(`Exit: ${sl.exitRule}${p.stopPct ? ` · Stop ${p.stopPct.toFixed(1)}%` : ''}`);
+  if (p) notes.push(`Exit: ${sl.exitRule}${p.stopPct ? ` · Stop ${p.stopPct.toFixed(1)}%` : ''}${p.exStop ? ` · Binance stop <span class="${p.exStop.status === 'NEW' ? 'up' : 'warn'}">${p.exStop.status}</span>` : ''}`);
   if (sl.pending) notes.push(`<span class="warn">Pending ${sl.pending.action} ${sl.pending.side} ${sl.pending.clientOrderId}</span>`);
   if (sl.block?.LONG || sl.block?.SHORT) notes.push('<span class="warn">Re-arm: waiting condition reset after stop</span>');
   if (v.notReady) notes.push(`<span class="warn">${esc(v.notReady)}</span>`);
@@ -373,7 +373,7 @@ function renderPositions(s) {
     <td>${fPrice(p.entryPrice, f(p.symbol))}</td><td>${fPrice(p.markPrice, f(p.symbol))}</td>
     <td>${fNum(p.orderAmount, 2)}</td><td>${p.qty}</td><td>${fNum(p.currentValue, 2)}</td>
     <td class="${cls(p.pnl)}">${fSigned(p.pnl)}</td><td class="${cls(p.pnlPct)}">${fPct(p.pnlPct)}</td>
-    <td class="down">${p.stopPrice ? fPrice(p.stopPrice, f(p.symbol)) : 'OFF'}</td><td class="muted">${p.stopDistPct != null ? p.stopDistPct.toFixed(2) + '%' : ''}</td>
+    <td class="down">${p.stopPrice ? fPrice(p.stopPrice, f(p.symbol)) : 'OFF'} ${exBadge(p)}</td><td class="muted">${p.stopDistPct != null ? p.stopDistPct.toFixed(2) + '%' : ''}</td>
     <td>${fNum(p.funding ? -p.funding : 0, 4)}</td><td>${fDur(p.holdingMs)}</td>
     <td><button class="btn small danger" data-close="${p.strategy}:${p.symbol}" ${p.status === 'PENDING' || p.status === 'UNKNOWN' ? 'disabled' : ''}>Close</button></td></tr>`).join('');
   const tv = s.positions.reduce((a, p) => a + p.currentValue, 0), tp = s.positions.reduce((a, p) => a + p.pnl, 0), ta = s.positions.reduce((a, p) => a + p.orderAmount, 0);
@@ -381,11 +381,19 @@ function renderPositions(s) {
     <tbody>${rows}</tbody><tfoot><tr><td>TOTAL</td><td></td><td></td><td></td><td></td><td>${fNum(ta, 2)}</td><td></td><td>${fNum(tv, 2)}</td><td class="${cls(tp)}">${fSigned(tp)}</td><td></td><td></td><td></td><td></td><td></td><td></td></tr></tfoot></table>`;
 }
 
+function exBadge(p) {
+  if (!p.exStop) return p.stopPrice && S.snap?.mode === 'LIVE' ? '<span class="tag OFF" title="Binance stop not placed">BOT</span>' : '';
+  const st = p.exStop.status;
+  const c = st === 'NEW' ? 'LONG' : st === 'FAILED' ? 'SHORT' : 'PENDING';
+  return `<span class="tag ${c}" title="Binance STOP_MARKET ${esc(st)} ${esc(p.exStop.error || '')}">EX${st === 'NEW' ? '' : ' ' + esc(st)}</span>`;
+}
+
 function buildOpenOrders(s) {
   const out = [];
   for (const o of s.orders) if (['SUBMITTED', 'UNKNOWN'].includes(o.status)) out.push(o);
   for (const p of s.positions) {
-    if (p.stopPrice) out.push({ time: p.entryTime, strategy: p.strategy, symbol: p.symbol, side: p.side === 'LONG' ? 'SELL' : 'BUY', positionSide: p.side, type: `${p.stopMode === 'FIXED_PERCENT' ? 'FIXED' : 'ATR'} STOP (bot)`, price: p.stopPrice, amount: p.currentValue, qty: p.qty, status: 'ACTIVE' });
+    if (p.exStop) out.push({ time: p.exStop.placedAt, strategy: p.strategy, symbol: p.symbol, side: p.side === 'LONG' ? 'SELL' : 'BUY', positionSide: p.side, type: 'STOP_MARKET (Binance)', price: p.exStop.triggerPrice, amount: p.currentValue, qty: p.exStop.qty, status: p.exStop.status === 'NEW' ? 'ACTIVE' : p.exStop.status, reason: p.exStop.clientAlgoId, error: p.exStop.error });
+    if (p.stopPrice) out.push({ time: p.entryTime, strategy: p.strategy, symbol: p.symbol, side: p.side === 'LONG' ? 'SELL' : 'BUY', positionSide: p.side, type: `${p.stopMode === 'FIXED_PERCENT' ? 'FIXED' : 'ATR'} STOP (bot)`, price: p.stopPrice, amount: p.currentValue, qty: p.qty, status: 'ACTIVE', reason: p.exStop?.status === 'NEW' ? 'backup (15s after breach)' : '' });
     if (p.tpPrice) out.push({ time: p.entryTime, strategy: p.strategy, symbol: p.symbol, side: p.side === 'LONG' ? 'SELL' : 'BUY', positionSide: p.side, type: 'TAKE PROFIT (bot)', price: p.tpPrice, amount: p.currentValue, qty: p.qty, status: 'ACTIVE' });
   }
   return out;
@@ -394,7 +402,7 @@ function buildOpenOrders(s) {
 function orderRow(o, s) {
   const f = s.symbols[o.symbol]?.filters;
   const st = o.status;
-  const c = st === 'FILLED' ? 'up' : st === 'REJECTED' || st === 'NOT_PLACED' ? 'down' : st === 'UNKNOWN' ? 'warn' : '';
+  const c = st === 'FILLED' ? 'up' : ['REJECTED', 'NOT_PLACED', 'FAILED'].includes(st) ? 'down' : ['UNKNOWN', 'PLACING', 'TRIGGERED', 'REPLACE'].includes(st) ? 'warn' : '';
   return `<tr data-sym="${o.symbol}"><td class="l">${fDateTime(o.time)}</td><td class="l"><b>${o.strategy}</b></td><td class="l">${o.symbol}</td>
     <td class="l"><span class="${o.side === 'BUY' ? 'up' : 'down'}">${o.side}</span> <span class="muted">${o.positionSide}${o.action ? ' ' + o.action : ''}</span></td>
     <td class="l">${o.type}</td><td>${o.price != null ? fPrice(o.price, f) : o.refPrice ? `~${fPrice(o.refPrice, f)}` : 'MKT'}</td>
@@ -403,7 +411,7 @@ function orderRow(o, s) {
 
 function renderOrders(s, open) {
   const head = '<thead><tr><th>Time</th><th>Strategy</th><th>Symbol</th><th>Side</th><th>Type</th><th>Price</th><th>Amount</th><th>Qty</th><th>Status</th><th>Note</th></tr></thead>';
-  $('#tab-orders').innerHTML = `<div class="sub-h">OPEN ORDERS · pending market orders + bot-managed emergency stops</div>
+  $('#tab-orders').innerHTML = `<div class="sub-h">OPEN ORDERS · pending market orders · Binance STOP_MARKET · bot-side stops</div>
     ${open.length ? `<table class="t">${head}<tbody>${open.map((o) => orderRow(o, s)).join('')}</tbody></table>` : '<div class="empty">No open orders</div>'}
     <div class="sub-h">ORDER HISTORY (${s.mode})</div>
     ${s.orders.length ? `<table class="t">${head}<tbody>${s.orders.map((o) => orderRow(o, s)).join('')}</tbody></table>` : '<div class="empty">No orders yet</div>'}`;

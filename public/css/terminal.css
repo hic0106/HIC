@@ -193,7 +193,7 @@ input:focus, select:focus { outline: none; border-color: var(--info); }
 .fr.amt { grid-template-columns: 1fr 86px 86px; }
 .fr label { color: var(--dim); font-size: 11.5px; }
 .fr input, .fr select { width: 100%; text-align: right; }
-.fr select { text-align: left; }
+.fr select { text-align: left; font-size: 11px; padding: 3px 2px; }
 .fr .hd { font: 700 9.5px var(--mono); color: var(--mute); text-align: center; }
 .fr .hd.act { color: var(--warn); }
 .fr input.act { border-color: #6b5406; }

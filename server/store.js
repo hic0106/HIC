@@ -23,6 +23,8 @@ export const DEFAULT_CONFIG = {
     stopsActiveWhenStopped: true, // Emergency stops keep protecting positions after STOP ALL BOTS
     dataStaleSec: 30,
     balanceBufferPct: 2, // extra margin headroom required in balance check
+    exchangeStops: true, // LIVE: also place each emergency stop on Binance (STOP_MARKET, Algo API) so it works while the PC is off
+    stopWorkingType: 'CONTRACT_PRICE', // trigger source for Binance stops: CONTRACT_PRICE (last) | MARK_PRICE
   },
   strategies: {
     TURTLE: {

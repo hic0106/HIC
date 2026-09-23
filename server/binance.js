@@ -97,6 +97,12 @@ export class BinanceClient {
   newOrder(params) { return this.signed('POST', '/fapi/v1/order', params); }
   queryOrder(symbol, origClientOrderId) { return this.signed('GET', '/fapi/v1/order', { symbol, origClientOrderId }); }
   userTrades(symbol, orderId) { return this.signed('GET', '/fapi/v1/userTrades', { symbol, orderId }); }
+
+  // Conditional orders (STOP_MARKET etc.) live in the Algo service since 2025-12-09.
+  // A triggered algo order becomes a regular order whose clientOrderId = clientAlgoId.
+  newAlgoOrder(params) { return this.signed('POST', '/fapi/v1/algoOrder', { algoType: 'CONDITIONAL', ...params }); }
+  cancelAlgoOrder(clientAlgoId) { return this.signed('DELETE', '/fapi/v1/algoOrder', { clientAlgoId }); }
+  openAlgoOrders(symbol) { return this.signed('GET', '/fapi/v1/openAlgoOrders', { algoType: 'CONDITIONAL', symbol }); }
 }
 
 // ---- exchange filter helpers
@@ -134,4 +140,17 @@ export function floorToStep(qty, step) {
 
 export function fmtQty(qty, step) {
   return qty.toFixed(decimals(step));
+}
+
+// Round a price to tick size; dir -1 = down, 1 = up, 0 = nearest.
+export function roundToTick(price, tick, dir = 0) {
+  if (!(tick > 0)) return price;
+  const d = decimals(tick);
+  const x = price / tick;
+  const n = dir < 0 ? Math.floor(x + 1e-9) : dir > 0 ? Math.ceil(x - 1e-9) : Math.round(x);
+  return Number((n * tick).toFixed(d));
+}
+
+export function fmtPrice(price, tick) {
+  return price.toFixed(decimals(tick));
 }

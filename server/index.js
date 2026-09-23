@@ -111,6 +111,8 @@ app.post('/api/config/general', (req, res) => {
       stopsActiveWhenStopped: !!b.stopsActiveWhenStopped,
       dataStaleSec: num(b.dataStaleSec, { min: 5, max: 600, int: true }),
       balanceBufferPct: num(b.balanceBufferPct, { min: 0, max: 50 }),
+      exchangeStops: !!b.exchangeStops,
+      stopWorkingType: ['CONTRACT_PRICE', 'MARK_PRICE'].includes(b.stopWorkingType) ? b.stopWorkingType : g.stopWorkingType,
     };
     store.config.general = next;
     store.saveConfig();
