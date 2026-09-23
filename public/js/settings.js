@@ -2,11 +2,24 @@
 import { $, $$, esc, api, toast } from './util.js';
 import { confirmDialog } from './modals.js';
 
-const LABEL = { TURTLE: 'Turtle 20/10 · Long + Short', ADX: 'ADX Trend · Long + Short', TSMOM: '30D Time-Series Momentum · Long + Cash' };
+const LABEL = {
+  TURTLE: 'Turtle 20/10 · Long + Short', ADX: 'ADX Trend · Long + Short', TSMOM: '30D Time-Series Momentum · Long + Cash',
+  QQQ_EMA_TREND: 'EMA Trend · Long / Cash', QQQ_TSMOM: 'Long-Term TSMOM · Long / Cash',
+  QQQ_SMA200: 'SMA200 Regime · optional', QQQ_TURTLE_50_20: 'Slow Turtle 50/20 · optional',
+};
 const PARAMS = {
   TURTLE: [['entryPeriod', 'Entry Period (D)', 1], ['exitPeriod', 'Exit Period (D)', 1], ['smaFilter', 'Short SMA Filter', 1]],
   ADX: [['adxPeriod', 'ADX Period', 1], ['threshold', 'ADX Threshold', 0.5], ['smaFilter', 'Short SMA Filter', 1]],
   TSMOM: [['lookback', 'Lookback (D)', 1]],
+  QQQ_EMA_TREND: [['fastEma', 'Fast EMA', 1], ['slowEma', 'Slow EMA', 1], ['sma200Filter', 'SMA200 entry filter', 'bool']],
+  QQQ_TSMOM: [['lookback', 'Lookback (US sessions)', 'select:63,126,189,252'], ['sma200Filter', 'SMA200 entry filter', 'bool']],
+  QQQ_SMA200: [['smaPeriod', 'SMA Period', 1]],
+  QQQ_TURTLE_50_20: [['entryPeriod', 'Entry Period (sessions)', 1], ['exitPeriod', 'Exit Period (sessions)', 1]],
+};
+const paramInput = (k, v, st) => {
+  if (st === 'bool') return `<span>${sw(`p.${k}`, !!v)}</span>`;
+  if (String(st).startsWith('select:')) return `<select name="p.${k}">${st.slice(7).split(',').map((x) => `<option ${Number(x) === Number(v) ? 'selected' : ''}>${x}</option>`).join('')}</select>`;
+  return numIn(`p.${k}`, v, st, 'min="1"');
 };
 
 let dirty = {};
@@ -15,7 +28,10 @@ export function renderStrategiesTab(root, S, onSaved) {
   if (Object.values(dirty).some(Boolean) && root.childElementCount) return; // keep unsaved edits
   const cfg = S.config;
   const mode = cfg.general.mode;
-  root.innerHTML = `<div class="set-grid">${['TURTLE', 'ADX', 'TSMOM'].map((n) => stratCol(n, cfg.strategies[n], mode, S.meta.supportsShort[n])).join('')}${generalCol(cfg.general)}</div>`;
+  root.innerHTML = `<div class="set-row-h">CRYPTO · BTCUSDT / ETHUSDT / XRPUSDT · signals on UTC daily close</div>
+    <div class="set-grid">${S.meta.cryptoStrategies.map((n) => stratCol(n, cfg.strategies[n], mode, S.meta.supportsShort[n])).join('')}${generalCol(cfg.general)}</div>
+    <div class="set-row-h">TRADFI · QQQUSDT (Invesco QQQ index perpetual) · LONG / CASH only · signals on US regular-session close (America/New_York) · Binance native history LIMITED (since 2026-04-06)</div>
+    <div class="set-grid four">${S.meta.tradfiStrategies.map((n) => stratCol(n, cfg.strategies[n], mode, S.meta.supportsShort[n])).join('')}</div>`;
   dirty = {};
 
   $$('.set-col', root).forEach((col) => {
@@ -63,9 +79,9 @@ function stratCol(name, c, mode, supportsShort) {
     <div class="fr amt"><label>Long Order Amount</label>${numIn('PAPER.long', a.PAPER.long, 1, `min="0" class="${act('PAPER')}"`)}${numIn('LIVE.long', a.LIVE.long, 1, `min="0" class="${act('LIVE')}"`)}</div>
     ${supportsShort ? `<div class="fr"><label>Short Enabled</label><span>${sw('shortEnabled', c.shortEnabled)}</span></div>
     <div class="fr amt" data-dep="shortEnabled"><label>Short Order Amount</label>${numIn('PAPER.short', a.PAPER.short, 1, `min="0" class="${act('PAPER')}"`)}${numIn('LIVE.short', a.LIVE.short, 1, `min="0" class="${act('LIVE')}"`)}</div>`
-      : '<div class="fr"><label>Short</label><span class="muted" style="text-align:right">NOT USED (CASH)</span></div>'}
+      : '<div class="fr"><label>Short</label><span class="muted" style="text-align:right">OFF (LONG / CASH)</span></div>'}
     <div class="set-sec">Entry / Exit Parameters</div>
-    ${PARAMS[name].map(([k, l, st]) => `<div class="fr"><label>${l}</label>${numIn(`p.${k}`, c.params[k], st, 'min="1"')}</div>`).join('')}
+    ${PARAMS[name].map(([k, l, st]) => `<div class="fr"><label>${l}</label>${paramInput(k, c.params[k], st)}</div>`).join('')}
     <div class="set-sec">Emergency Stop Loss</div>
     <div class="fr"><label>Stop Loss Mode</label><select name="stop.mode">${['ATR_DYNAMIC', 'FIXED_PERCENT', 'OFF'].map((m) => `<option ${m === c.stop.mode ? 'selected' : ''}>${m}</option>`).join('')}</select></div>
     <div class="fr" data-stop="ATR_DYNAMIC"><label>ATR Period</label>${numIn('stop.atrPeriod', c.stop.atrPeriod, 1, 'min="2"')}</div>
@@ -85,7 +101,8 @@ function generalCol(g) {
   return `<div class="set-col" data-name="GENERAL">
     <div class="set-h"><span><b>GENERAL</b><small>Execution · Costs · Risk</small></span></div>
     <div class="set-sec">Futures Execution</div>
-    <div class="fr"><label>Leverage (x)</label>${numIn('leverage', g.leverage, 1, 'min="1" max="20"')}</div>
+    <div class="fr"><label>Leverage Crypto (x)</label>${numIn('leverage', g.leverage, 1, 'min="1" max="20"')}</div>
+    <div class="fr"><label>Leverage TradFi QQQ (x)</label>${numIn('leverageTradfi', g.leverageTradfi ?? 1, 1, 'min="1" max="10"')}</div>
     <div class="note">기본 1x. 주문금액 = 포지션 명목금액(Notional). 레버리지는 증거금만 줄이며 자동으로 올리지 않음. 변경은 봇 정지 상태에서만 가능.</div>
     <div class="set-sec">Costs (PnL 반영)</div>
     <div class="fr"><label>Taker Fee %</label>${numIn('takerFeePct', g.takerFeePct, 0.001, 'min="0"')}</div>
@@ -127,7 +144,7 @@ function readStrategy(col) {
   const val = (n) => v(col, n)?.value;
   const chk = (n) => !!v(col, n)?.checked;
   const params = {};
-  $$('[name^="p."]', col).forEach((i) => { params[i.name.slice(2)] = i.value; });
+  $$('[name^="p."]', col).forEach((i) => { params[i.name.slice(2)] = i.type === 'checkbox' ? i.checked : i.value; });
   return {
     enabled: chk('enabled'), shortEnabled: chk('shortEnabled'),
     amounts: { PAPER: { long: val('PAPER.long'), short: val('PAPER.short') ?? 0 }, LIVE: { long: val('LIVE.long'), short: val('LIVE.short') ?? 0 } },
@@ -138,6 +155,6 @@ function readStrategy(col) {
 }
 function readGeneral(col) {
   const o = {};
-  $$('input, select', col).forEach((i) => { o[i.name] = i.type === 'checkbox' ? i.checked : i.value; });
+  $$('input, select', col).forEach((i) => { if (i.name) o[i.name] = i.type === 'checkbox' ? i.checked : i.value; });
   return o;
 }

@@ -247,3 +247,14 @@ input:focus, select:focus { outline: none; border-color: var(--info); }
 .sub-h.warn { color: var(--warn); }
 #sumCtl { font-weight: 600; letter-spacing: .3px; margin-left: 8px; margin-right: auto; }
 #sumCtl .tag { font-size: 9.5px; }
+
+/* multi-asset */
+.wl-group { font: 700 9.5px var(--sans); letter-spacing: 1.2px; color: var(--mute); padding: 5px 10px 3px; background: var(--panel2); border-bottom: 1px solid var(--line); }
+.wl-strats.four { grid-template-columns: repeat(4, 1fr); }
+.t tr.grp td { color: var(--dim); font: 700 9.5px var(--sans); letter-spacing: 1px; background: var(--panel2); }
+.set-row-h { font: 700 10px var(--sans); letter-spacing: 1px; color: var(--warn); padding: 6px 10px; background: #1a1708; border-bottom: 1px solid var(--line); border-top: 1px solid var(--line); }
+.set-grid.four { grid-template-columns: repeat(4, minmax(290px, 1fr)); }
+.t tr.chg td { background: rgba(240, 185, 11, .05); }
+#mktTable { table-layout: fixed; }
+#mktTable td:first-child { width: 42%; }
+#mktTable td:last-child { white-space: normal; overflow-wrap: anywhere; }

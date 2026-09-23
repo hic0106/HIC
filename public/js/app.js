@@ -5,8 +5,11 @@ import { renderStrategiesTab } from './settings.js';
 import { confirmDialog, openApiModal } from './modals.js';
 import { mountController, unmountController, controllerHeaderHtml, statusTag } from './controller.js';
 
-const STRATS = ['TURTLE', 'ADX', 'TSMOM'];
-const SHORT = { TURTLE: 'TURTLE', ADX: 'ADX', TSMOM: 'TSMOM' };
+const SHORT = { TURTLE: 'TURTLE', ADX: 'ADX', TSMOM: 'TSMOM', QQQ_EMA_TREND: 'QQQ EMA TREND', QQQ_TSMOM: 'QQQ TSMOM', QQQ_SMA200: 'QQQ SMA200', QQQ_TURTLE_50_20: 'QQQ TURTLE 50/20' };
+const CHIP = { TURTLE: 'TURT', ADX: 'ADX', TSMOM: 'TSMOM', QQQ_EMA_TREND: 'EMA', QQQ_TSMOM: 'TSM', QQQ_SMA200: 'SMA', QQQ_TURTLE_50_20: 'T50' };
+const stratsOf = (sym) => S.meta.strategiesBySymbol[sym] || [];
+const classOf = (sym) => S.meta.symbolMeta[sym]?.asset_class || 'CRYPTO';
+const isLongOnly = (st) => !S.meta.supportsShort[st];
 const S = {
   snap: null, config: null, meta: null, sel: localGet('sel', 'BTCUSDT'), tab: 'positions',
   logs: [], logFilter: 'ALL', errCount: 0,
@@ -146,7 +149,7 @@ function openStrategies() {
 
 function buildIntervalSeg() {
   const cur = localGet('iv', '1d');
-  $('#intervalSeg').innerHTML = S.meta.intervals.map((i) => `<button data-iv="${i}" class="${i === cur ? 'on' : ''}">${i.toUpperCase()}</button>`).join('');
+  $('#intervalSeg').innerHTML = [...S.meta.intervals, S.meta.sessionInterval].map((i) => `<button data-iv="${i}" class="${i === cur ? 'on' : ''}" ${i === S.meta.sessionInterval ? 'title="US regular-session daily candles (QQQ signal data)"' : ''}>${i === S.meta.sessionInterval ? 'US 1D' : i.toUpperCase()}</button>`).join('');
   chart.interval = cur;
   $('#intervalSeg').addEventListener('click', (e) => {
     const b = e.target.closest('button[data-iv]');
@@ -162,6 +165,13 @@ function selectSymbol(sym) {
   if (!S.meta.symbols.includes(sym)) sym = S.meta.symbols[0];
   S.sel = sym;
   localSet('sel', sym);
+  const isSession = S.meta.symbolMeta[sym]?.session === 'US_REGULAR_MARKET';
+  const sb = $(`#intervalSeg button[data-iv="${S.meta.sessionInterval}"]`);
+  if (sb) sb.style.display = isSession ? '' : 'none';
+  if (!isSession && chart.interval === S.meta.sessionInterval) {
+    chart.interval = '1d';
+    $$('#intervalSeg button').forEach((x) => x.classList.toggle('on', x.dataset.iv === '1d'));
+  }
   chart.load(sym).then(() => S.snap && chart.updateOverlays(S.snap, sym));
   if (S.snap) render();
 }
@@ -219,30 +229,48 @@ function stLetter(status) {
 }
 
 function renderWatchlist(s) {
+  let lastClass = null;
   $('#wlBody').innerHTML = S.meta.symbols.map((sym) => {
+    const c = classOf(sym);
+    const head = c !== lastClass ? `<div class="wl-group">${S.meta.classLabel[c]}</div>` : '';
+    lastClass = c;
+    return head + wlRow(s, sym);
+  }).join('');
+  expTable(s);
+}
+
+function wlRow(s, sym) {
     const m = s.symbols[sym];
     const t = m.ticker;
     const f = m.filters;
     const e = s.account.bySymbol[sym];
     const netTag = e.long > 0 && e.short > 0 ? 'MIXED' : e.long > 0 ? 'LONG' : e.short > 0 ? 'SHORT' : 'FLAT';
-    const chips = STRATS.map((st) => {
+    const chips = stratsOf(sym).map((st) => {
       const sl = slotOf(s, st, sym);
-      const [k, label] = stLetter(sl.status);
-      return `<div class="st-chip"><i>${st === 'TURTLE' ? 'TURT' : st}</i><span class="st-${k}">${label}</span></div>`;
+      let [k, label] = stLetter(sl.status);
+      if (isLongOnly(st) && sl.status === 'FLAT') { k = 'W'; label = 'CASH'; }
+      return `<div class="st-chip"><i>${CHIP[st]}</i><span class="st-${k}">${label}</span></div>`;
     }).join('');
+    const um = m.underlyingMarket;
+    const sub = m.unavailable ? '<span class="tag SHORT" title="' + esc(m.unavailable) + '">UNAVAILABLE</span>'
+      : um ? `<span class="tag ${um.underlying === 'OPEN' ? 'LONG' : 'WAIT'}" title="Underlying US regular session">US ${um.underlying}</span>` : '';
     return `<div class="wl-row ${sym === S.sel ? 'sel' : ''}" data-sym="${sym}">
       <div class="wl-top"><span class="wl-sym">${sym.replace('USDT', '')}<small>USDT</small></span><span class="wl-px ${cls(t?.changePct)}">${fPrice(m.price, f)}</span></div>
-      <div class="wl-mid"><span class="tag ${netTag}">${netTag}</span><span class="${cls(t?.changePct)}">${t ? fPct(t.changePct) : '—'}</span></div>
-      <div class="wl-strats">${chips}</div></div>`;
-  }).join('');
+      <div class="wl-mid"><span><span class="tag ${netTag}">${netTag}</span> ${sub}</span><span class="${cls(t?.changePct)}">${t ? fPct(t.changePct) : '—'}</span></div>
+      <div class="wl-strats ${stratsOf(sym).length > 3 ? 'four' : ''}">${chips}</div></div>`;
+}
 
-  const rows = S.meta.symbols.map((sym) => {
-    const e = s.account.bySymbol[sym];
-    return `<tr data-sym="${sym}"><td>${sym.replace('USDT', '')}</td><td class="up">${fNum(e.long, 0)}</td><td class="down">${fNum(e.short, 0)}</td><td class="${cls(e.net)}">${fSigned(e.net, 0)}</td></tr>`;
-  }).join('');
+function expTable(s) {
   const a = s.account;
-  $('#expTable').innerHTML = `<thead><tr><th>Coin</th><th>Long</th><th>Short</th><th>Net</th></tr></thead><tbody>${rows}</tbody>
-    <tfoot><tr><td>TOTAL</td><td class="up">${fNum(a.longExp, 0)}</td><td class="down">${fNum(a.shortExp, 0)}</td><td class="${cls(a.netExp)}">${fSigned(a.netExp, 0)}</td></tr></tfoot>`;
+  const row = (sym) => { const e = a.bySymbol[sym]; return `<tr data-sym="${sym}"><td>${sym.replace('USDT', '')}</td><td class="up">${fNum(e.long, 0)}</td><td class="down">${fNum(e.short, 0)}</td><td class="${cls(e.net)}">${fSigned(e.net, 0)}</td></tr>`; };
+  const body = S.meta.assetClasses.map((c) => {
+    const k = a.byClass?.[c] || { long: 0, short: 0, net: 0 };
+    const syms = S.meta.symbols.filter((x) => classOf(x) === c);
+    return `<tr class="grp"><td>${S.meta.classLabel[c]}</td><td class="up">${fNum(k.long, 0)}</td><td class="down">${fNum(k.short, 0)}</td><td class="${cls(k.net)}">${fSigned(k.net, 0)}</td></tr>${syms.map(row).join('')}`;
+  }).join('');
+  $('#expTable').innerHTML = `<thead><tr><th>Asset</th><th>Long</th><th>Short</th><th>Net</th></tr></thead><tbody>${body}</tbody>
+    <tfoot><tr><td>TOTAL</td><td class="up">${fNum(a.longExp, 0)}</td><td class="down">${fNum(a.shortExp, 0)}</td><td class="${cls(a.netExp)}">${fSigned(a.netExp, 0)}</td></tr>
+    <tr><td>GROSS</td><td colspan="3">${fNum(a.grossExp, 0)} · Crypto ${fNum(a.byClass?.CRYPTO?.gross, 0)} · TradFi ${fNum(a.byClass?.TRADFI_INDEX?.gross, 0)}</td></tr></tfoot>`;
 }
 
 function renderRight(s) {
@@ -267,9 +295,16 @@ function renderRight(s) {
     ['Exposure L / S', `<span class="up">${fNum(e.long, 0)}</span> / <span class="down">${fNum(e.short, 0)}</span>`],
     ['Net Exposure', `<span class="${cls(e.net)}">${fSigned(e.net, 0)}</span> · PnL <span class="${cls(e.pnl)}">${fSigned(e.pnl)}</span>`],
     ['Min Notional / Step', f ? `${f.minNotional} / ${f.stepSize}` : '—'],
+    ...(m.underlyingMarket ? [
+      ['Asset Class', `TRADFI INDEX <span class="muted">${esc(m.underlying)}</span>`],
+      ['Underlying Market', `<span class="${m.underlyingMarket.underlying === 'OPEN' ? 'up' : 'muted'}">${m.underlyingMarket.underlying}</span> <span class="muted">${m.underlyingMarket.underlying === 'OPEN' ? 'closes ' + fTime(m.underlyingMarket.closesAt) : m.underlyingMarket.nextOpen ? 'opens ' + fDateTime(m.underlyingMarket.nextOpen) : ''}</span>`],
+      [`Binance ${sym}`, m.unavailable ? `<span class="down">UNAVAILABLE</span>` : `<span class="up">${esc(f?.status || '—')}</span> <span class="muted">24/7</span>`],
+      ['Signal Data', `US session 1D · ${m.signalCandles} sess.`],
+      ['Native History', `<span class="warn">${esc(m.nativeHistory)}</span> <span class="muted">(Binance, since 2026-04-06)</span>`],
+    ] : []),
   ].map(([k, v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join('');
 
-  $('#stratStatus').innerHTML = STRATS.map((st) => stratCard(s, st, sym, f)).join('');
+  $('#stratStatus').innerHTML = stratsOf(sym).map((st) => stratCard(s, st, sym, f)).join('');
   renderOrderBook(m, f);
 }
 
@@ -278,7 +313,8 @@ function stratCard(s, st, sym, f) {
   const cfg = S.config.strategies[st];
   const amt = cfg.amounts[s.mode];
   const p = s.positions.find((x) => x.strategy === st && x.symbol === sym);
-  const [, label] = stLetter(sl.status);
+  let [, label] = stLetter(sl.status);
+  if (isLongOnly(st) && sl.status === 'FLAT') label = 'CASH';
   const tagCls = sl.status === 'FLAT' ? 'WAIT' : sl.status;
   const v = sl.view || {};
   const rows = [];
@@ -292,7 +328,7 @@ function stratCard(s, st, sym, f) {
     add('Stop', p.stopPrice ? fPrice(p.stopPrice, f) : 'OFF', 'down');
   } else {
     add('Long Order', `${fNum(amt.long, 0)} USDT`);
-    add('Short Order', st === 'TSMOM' ? 'CASH' : cfg.shortEnabled ? `${fNum(amt.short, 0)} USDT` : 'OFF');
+    add('Short Order', isLongOnly(st) ? 'CASH' : cfg.shortEnabled ? `${fNum(amt.short, 0)} USDT` : 'OFF');
   }
   if (st === 'TURTLE') {
     add('20D High', fPrice(v.entryHigh, f)); add('20D Low', fPrice(v.entryLow, f));
@@ -302,8 +338,18 @@ function stratCard(s, st, sym, f) {
     add('ADX', fNum(v.adx, 1), v.adx > cfg.params.threshold ? 'warn' : '');
     add('+DI / -DI', `<span class="up">${fNum(v.plusDI, 1)}</span>/<span class="down">${fNum(v.minusDI, 1)}</span>`);
     add('SMA200', fPrice(v.sma, f), v.sma && s.symbols[sym].price < v.sma ? 'down' : 'up');
-  } else {
+  } else if (st === 'TSMOM') {
     add('30D Mom.', v.momentumPct != null ? fPct(v.momentumPct) : '—', cls(v.momentumPct));
+  } else if (st === 'QQQ_EMA_TREND') {
+    add(`EMA${cfg.params.fastEma}`, fPrice(v.fastEma, f), v.fastEma > v.slowEma ? 'up' : 'down');
+    add(`EMA${cfg.params.slowEma}`, fPrice(v.slowEma, f));
+  } else if (st === 'QQQ_TSMOM') {
+    add(`${cfg.params.lookback}D Mom.`, v.momentumPct != null ? fPct(v.momentumPct) : '—', cls(v.momentumPct));
+  } else if (st === 'QQQ_SMA200') {
+    add(`SMA${cfg.params.smaPeriod}`, fPrice(v.sma, f));
+    add('Regime', v.sma == null ? '—' : v.above ? 'ABOVE' : 'BELOW', v.above ? 'up' : 'down');
+  } else if (st === 'QQQ_TURTLE_50_20') {
+    add(`${cfg.params.entryPeriod}D High`, fPrice(v.entryHigh, f)); add(`${cfg.params.exitPeriod}D Low`, fPrice(v.exitLow, f));
   }
   if (!p && sl.pending == null) add('Exit Rule', sl.exitRule);
   const notes = [];
@@ -311,7 +357,8 @@ function stratCard(s, st, sym, f) {
   if (sl.pending) notes.push(`<span class="warn">Pending ${sl.pending.action} ${sl.pending.side} ${sl.pending.clientOrderId}</span>`);
   if (sl.block?.LONG || sl.block?.SHORT) notes.push('<span class="warn">Re-arm: waiting condition reset after stop</span>');
   if (v.notReady) notes.push(`<span class="warn">${esc(v.notReady)}</span>`);
-  if (sl.evalCandle) notes.push(`Last eval: ${fDateTime(sl.evalCandle).slice(0, 10)} D · ${esc(sl.lastSignal || '')}`);
+  if (sl.evalCandle) notes.push(`Last eval: ${fDateTime(sl.evalCandle).slice(0, 10)} ${S.meta.strategyClass[st] === 'CRYPTO' ? 'D' : 'US session'} · ${esc(sl.lastSignal || '')}`);
+  if (!cfg.enabled) notes.push('<span class="muted">disabled (optional / research)</span>');
   return `<div class="strat-card"><div class="sc-h"><b>${SHORT[st]}</b><span class="tag ${tagCls}">${p ? p.side : label}</span></div>
     <div class="sc-grid">${rows.join('')}</div><div class="sc-note">${notes.join('<br>')}</div></div>`;
 }
@@ -342,13 +389,14 @@ function renderSummary(s) {
     return `${statusTag(r.recommended, r.recommendedMult)}${applied ? '' : ' <span class="muted">obs</span>'}`;
   };
   const amt = (base, actual) => (Math.abs(actual - base) < 1e-9 ? fNum(base, 0) : `${fNum(base, 0)}→<b class="warn">${fNum(actual, 0)}</b>`);
-  const rows = s.strategies.map((x) => `<tr><td><b>${x.strategy}</b></td>
+  let lastC = null;
+  const rows = s.strategies.map((x) => { const g = x.assetClass !== lastC ? `<tr class="grp"><td colspan="10">${S.meta.classLabel[x.assetClass]}</td></tr>` : ''; lastC = x.assetClass; return g + `<tr><td><b>${SHORT[x.strategy] || x.strategy}</b></td>
     <td class="${x.enabled ? 'up' : 'down'}">${x.enabled ? 'ON' : 'OFF'}</td>
-    <td>${amt(x.longAmount, x.longActual)}</td><td>${x.strategy === 'TSMOM' ? 'CASH' : x.shortEnabled ? amt(x.shortAmount, x.shortActual) : 'OFF'}</td>
-    <td class="l">L ${ctlCell(x.strategy, 'LONG')}${x.strategy === 'TSMOM' ? '' : ` S ${ctlCell(x.strategy, 'SHORT')}`}</td>
+    <td>${amt(x.longAmount, x.longActual)}</td><td>${isLongOnly(x.strategy) ? 'CASH' : x.shortEnabled ? amt(x.shortAmount, x.shortActual) : 'OFF'}</td>
+    <td class="l">L ${ctlCell(x.strategy, 'LONG')}${isLongOnly(x.strategy) ? '' : ` S ${ctlCell(x.strategy, 'SHORT')}`}</td>
     <td><span class="up">${x.longs}L</span> / <span class="down">${x.shorts}S</span></td>
     <td class="${cls(x.unrealized)}">${fSigned(x.unrealized)}</td><td class="${cls(x.realized)}">${fSigned(x.realized)}</td>
-    <td>${x.trades}</td><td>${x.winRate != null ? x.winRate.toFixed(0) + '%' : '—'}</td></tr>`).join('');
+    <td>${x.trades}</td><td>${x.winRate != null ? x.winRate.toFixed(0) + '%' : '—'}</td></tr>`; }).join('');
   const tu = s.strategies.reduce((a, x) => a + x.unrealized, 0), tr = s.strategies.reduce((a, x) => a + x.realized, 0);
   $('#stratSumTable').innerHTML = `<thead><tr><th>Strategy</th><th>State</th><th>Long Amt</th><th>Short Amt</th><th class="l">Controller</th><th>Open</th><th>Unrealized</th><th>Realized</th><th>Trades</th><th>Win</th></tr></thead>
     <tbody>${rows}</tbody><tfoot><tr><td>TOTAL</td><td></td><td></td><td></td><td></td><td>${s.positions.length}</td><td class="${cls(tu)}">${fSigned(tu)}</td><td class="${cls(tr)}">${fSigned(tr)}</td><td>${s.trades.length}</td><td></td></tr></tfoot>`;
@@ -357,8 +405,12 @@ function renderSummary(s) {
     ['Wallet Balance', a.wallet != null ? fUsd(a.wallet) : '—'],
     ['Unrealized (net)', `<span class="${cls(a.unrealizedNet)}">${fSigned(a.unrealizedNet)}</span>`],
     ['Realized (net)', `<span class="${cls(a.realized)}">${fSigned(a.realized)}</span>`],
+    ['Crypto PnL', `<span class="${cls(a.byClass?.CRYPTO?.pnl)}">${fSigned(a.byClass?.CRYPTO?.pnl)}</span>`],
+    ['TradFi PnL', `<span class="${cls(a.byClass?.TRADFI_INDEX?.pnl)}">${fSigned(a.byClass?.TRADFI_INDEX?.pnl)}</span>`],
+    ['Total PnL', `<span class="${cls(a.totalPnl)}">${fSigned(a.totalPnl)}</span>`],
+    ['Gross / Crypto / TradFi Exp', `${fNum(a.grossExp, 0)} / ${fNum(a.byClass?.CRYPTO?.gross, 0)} / ${fNum(a.byClass?.TRADFI_INDEX?.gross, 0)}`],
     ['Base Capital', a.baseCapital ? fUsd(a.baseCapital) : '—'],
-    ['Leverage', `${S.config.general.leverage}x${s.mode === 'LIVE' && s.conn.hedgeMode != null ? ` · ${s.conn.hedgeMode ? 'Hedge' : '<span class="down">One-way</span>'}` : ''}`],
+    ['Leverage C / T', `${S.config.general.leverage}x / ${S.config.general.leverageTradfi ?? 1}x${s.mode === 'LIVE' && s.conn.hedgeMode != null ? ` · ${s.conn.hedgeMode ? 'Hedge' : '<span class="down">One-way</span>'}` : ''}`],
     ['Fee / Slippage', `${S.config.general.takerFeePct}% / ${S.config.general.slippagePct}%`],
   ].map(([k, v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join('');
 }

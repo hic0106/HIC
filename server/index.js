@@ -6,9 +6,10 @@ import express from 'express';
 import { WebSocketServer } from 'ws';
 import { Store, SYMBOLS } from './store.js';
 import { Logger } from './logger.js';
-import { MarketData, CHART_INTERVALS } from './marketData.js';
+import { MarketData, CHART_INTERVALS, SESSION_INTERVAL } from './marketData.js';
 import { Engine } from './engine.js';
-import { STRATEGIES, STRATEGY_META } from './strategies.js';
+import { ALL_STRATEGIES as STRATEGIES, META as STRATEGY_META, STRATEGY_CLASS, strategiesForSymbol, CRYPTO_STRATEGIES, TRADFI_STRATEGIES } from './strategyRegistry.js';
+import { SYMBOL_META, ASSET_CLASSES, CLASS_LABEL, isSessionSymbol } from './assets.js';
 import { Controller, CONTROLLER_MODES } from './controller/controllerEngine.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -17,7 +18,7 @@ const PORT = Number(process.env.PORT || 8420);
 
 const store = new Store();
 const log = new Logger(store);
-const md = new MarketData(SYMBOLS, log);
+const md = new MarketData(SYMBOLS, log, { getCalendar: () => store.config.general.usCalendar });
 const engine = new Engine(store, md, log);
 // Controller layer: strategies -> controller (size multiplier) -> existing execution engine
 const controller = new Controller({ store, md, engine, log });
@@ -45,12 +46,20 @@ const ok = (res, r = { ok: true }) => res.status(r.ok === false ? 400 : 200).jso
 const confirmed = (req, word) => String(req.body?.confirm || '').trim().toUpperCase() === word;
 
 app.get('/api/snapshot', (req, res) => res.json(fullSnapshot()));
-app.get('/api/config', (req, res) => res.json({ config: store.config, meta: { symbols: SYMBOLS, strategies: STRATEGIES, intervals: CHART_INTERVALS, supportsShort: Object.fromEntries(STRATEGIES.map((s) => [s, STRATEGY_META[s].supportsShort])) } }));
+app.get('/api/config', (req, res) => res.json({ config: store.config, meta: {
+  symbols: SYMBOLS, strategies: STRATEGIES, intervals: CHART_INTERVALS, sessionInterval: SESSION_INTERVAL,
+  supportsShort: Object.fromEntries(STRATEGIES.map((s) => [s, STRATEGY_META[s].supportsShort])),
+  labels: Object.fromEntries(STRATEGIES.map((s) => [s, STRATEGY_META[s].label])),
+  strategyClass: STRATEGY_CLASS, cryptoStrategies: CRYPTO_STRATEGIES, tradfiStrategies: TRADFI_STRATEGIES,
+  strategiesBySymbol: Object.fromEntries(SYMBOLS.map((s) => [s, strategiesForSymbol(s)])),
+  symbolMeta: SYMBOL_META, assetClasses: ASSET_CLASSES, classLabel: CLASS_LABEL,
+} }));
 app.get('/api/logs', (req, res) => res.json(log.recent(1000)));
 
 app.get('/api/klines', async (req, res) => {
   const { symbol, interval } = req.query;
-  if (!SYMBOLS.includes(symbol) || !CHART_INTERVALS.includes(interval)) return res.status(400).json({ ok: false, msg: 'bad params' });
+  const okIv = CHART_INTERVALS.includes(interval) || (interval === SESSION_INTERVAL && isSessionSymbol(symbol));
+  if (!SYMBOLS.includes(symbol) || !okIv) return res.status(400).json({ ok: false, msg: 'bad params' });
   try { res.json(await md.chartKlines(symbol, interval, 1000)); } catch (e) { res.status(502).json({ ok: false, msg: e.message }); }
 });
 
@@ -92,7 +101,17 @@ app.post('/api/config/strategy/:name', (req, res) => {
     if (name === 'TURTLE') next.params = { entryPeriod: num(b.params.entryPeriod, P), exitPeriod: num(b.params.exitPeriod, P), smaFilter: num(b.params.smaFilter, P) };
     if (name === 'ADX') next.params = { adxPeriod: num(b.params.adxPeriod, P), threshold: num(b.params.threshold, { min: 1, max: 100 }), smaFilter: num(b.params.smaFilter, P) };
     if (name === 'TSMOM') next.params = { lookback: num(b.params.lookback, P) };
+    if (name === 'QQQ_EMA_TREND') {
+      next.params = { fastEma: num(b.params.fastEma, P), slowEma: num(b.params.slowEma, P), sma200Filter: !!b.params.sma200Filter };
+      if (next.params.fastEma >= next.params.slowEma) throw new Error('Fast EMA must be < Slow EMA');
+    }
+    if (name === 'QQQ_TSMOM') next.params = { lookback: num(b.params.lookback, { min: 20, max: 400, int: true }), sma200Filter: !!b.params.sma200Filter };
+    if (name === 'QQQ_SMA200') next.params = { smaPeriod: num(b.params.smaPeriod, P) };
+    if (name === 'QQQ_TURTLE_50_20') next.params = { entryPeriod: num(b.params.entryPeriod, P), exitPeriod: num(b.params.exitPeriod, P) };
+    if (!STRATEGY_META[name].supportsShort) { next.amounts.PAPER.short = 0; next.amounts.LIVE.short = 0; } // long / cash only
+    const prevCfg = structuredClone(cur);
     store.config.strategies[name] = next;
+    controller.onStrategyConfigChanged(name, prevCfg, next);
     store.saveConfig();
     log.info(`${name} settings saved (${engine.mode}${engine.runState === 'RUNNING' ? ', applies from next evaluation; open positions keep their stops' : ''})`, 'CONFIG_SAVED', { amounts: next.amounts, params: next.params, stop: next.stop });
     engine.evaluateAll('config saved');
@@ -107,10 +126,12 @@ app.post('/api/config/general', (req, res) => {
     const b = req.body.settings;
     const g = store.config.general;
     const lev = num(b.leverage, { min: 1, max: 20, int: true });
-    if (lev !== g.leverage && engine.runState === 'RUNNING') throw new Error('Stop bots before changing leverage');
+    const levT = num(b.leverageTradfi ?? g.leverageTradfi ?? 1, { min: 1, max: 10, int: true });
+    if ((lev !== g.leverage || levT !== g.leverageTradfi) && engine.runState === 'RUNNING') throw new Error('Stop bots before changing leverage');
     const next = {
       ...g,
       leverage: lev,
+      leverageTradfi: levT,
       takerFeePct: num(b.takerFeePct, { min: 0, max: 1 }),
       makerFeePct: num(b.makerFeePct, { min: 0, max: 1 }),
       slippagePct: num(b.slippagePct, { min: 0, max: 5 }),
@@ -125,7 +146,7 @@ app.post('/api/config/general', (req, res) => {
     };
     store.config.general = next;
     store.saveConfig();
-    log.info('General settings saved', 'CONFIG_SAVED', { leverage: next.leverage, fee: next.takerFeePct, slip: next.slippagePct });
+    log.info('General settings saved', 'CONFIG_SAVED', { leverage: next.leverage, leverageTradfi: next.leverageTradfi, fee: next.takerFeePct, slip: next.slippagePct });
     ok(res);
   } catch (e) {
     ok(res, { ok: false, msg: e.message });
@@ -198,8 +219,9 @@ app.post('/api/controller/config', (req, res) => {
     next.guards.maxCoinExposurePctForBoost = n(b.guards.maxCoinExposurePctForBoost, { min: 0, max: 1000 });
     for (const st of STRATEGIES) for (const side of ['LONG', 'SHORT']) {
       const v = b.maxOrderUsdt?.[st]?.[side];
-      next.maxOrderUsdt[st][side] = v === '' || v == null ? null : n(v, { min: 1, max: 1e7 });
+      (next.maxOrderUsdt[st] ||= { LONG: null, SHORT: null })[side] = v === '' || v == null ? null : n(v, { min: 1, max: 1e7 });
     }
+    next.resetHistoryOnParamChange = b.resetHistoryOnParamChange == null ? c.resetHistoryOnParamChange : !!b.resetHistoryOnParamChange;
     // multipliers / modes are NOT editable here (fixed ladder, max 1.25)
     store.config.controller = next;
     store.saveConfig();

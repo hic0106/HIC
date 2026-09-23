@@ -302,7 +302,7 @@ test('every decision stored in history with reason and required fields', () => {
   giveGoodHistory(controller);
   controller.evaluate('test');
   const h = controller.cstore.history;
-  assert.equal(h.length, 6); // 3 strategies × LONG/SHORT
+  assert.equal(h.length, controller.keys().length); // crypto L/S + long-only strategies (TSMOM, QQQ)
   for (const f of ['timestamp', 'controller_mode', 'strategy', 'side', 'previous_status', 'new_status', 'previous_multiplier', 'new_multiplier',
     '30d_return', '90d_return', '180d_return', 'current_drawdown', 'max_drawdown', 'sharpe', 'sortino', 'profit_factor', 'trade_count',
     'market_regime', 'reason', 'approved_by_user', 'applied']) {

@@ -2,8 +2,12 @@
 import { EventEmitter } from 'node:events';
 import WebSocket from 'ws';
 import { BinanceClient, endpoints, parseSymbolFilters } from './binance.js';
+import { SYMBOL_META, isSessionSymbol, assetClassOf } from './assets.js';
+import { BinanceUsSessionProvider } from './dataProviders.js';
+import { DEFAULT_US_CALENDAR, marketStatus } from './session.js';
 
 export const CHART_INTERVALS = ['5m', '15m', '1h', '4h', '1d'];
+export const SESSION_INTERVAL = 'US1D'; // chart of US regular-session candles (QQQ signal data)
 const DAILY = '1d';
 const DAILY_HISTORY = 500;
 
@@ -11,10 +15,11 @@ const toCandle = (a) => ({ t: a[0], o: +a[1], h: +a[2], l: +a[3], c: +a[4], v: +
 const wsCandle = (k) => ({ t: k.t, o: +k.o, h: +k.h, l: +k.l, c: +k.c, v: +k.v, T: k.T });
 
 export class MarketData extends EventEmitter {
-  constructor(symbols, logger) {
+  constructor(symbols, logger, { getCalendar } = {}) {
     super();
     this.symbols = symbols;
     this.log = logger;
+    this.getCalendar = getCalendar || (() => DEFAULT_US_CALENDAR);
     const ep = endpoints(false); // market data always from mainnet (public, no key)
     this.rest = new BinanceClient({ restBase: ep.rest });
     this.wsBase = ep.ws;
@@ -26,6 +31,9 @@ export class MarketData extends EventEmitter {
         forming: null, // current (open) daily candle
         last: null, lastTs: 0,
         ticker: null, mark: null, depth: null,
+        assetClass: assetClassOf(sym), unavailable: null,
+        // QQQ: US regular-session signal provider; crypto: UTC daily (null)
+        session: isSessionSymbol(sym) ? new BinanceUsSessionProvider({ rest: this.rest, symbol: sym, listedAt: SYMBOL_META[sym].listedAt, getCalendar: () => this.getCalendar(), log: logger }) : null,
       };
     }
     this.status = 'CONNECTING';
@@ -36,12 +44,19 @@ export class MarketData extends EventEmitter {
 
   async start() {
     await this.loadExchangeInfo();
-    for (const sym of this.symbols) await this.loadDaily(sym);
-    this.connect('market', this.symbols.flatMap((s) => {
+    for (const sym of this.symbols) {
+      if (!this.s[sym].session) { await this.loadDaily(sym); continue; }
+      // TradFi symbols are isolated: a failure never blocks crypto trading
+      if (!this.filters[sym]) { this.markUnavailable(sym, 'symbol not found in Binance exchangeInfo'); continue; }
+      try { await this.loadSession(sym); } catch (e) { this.markUnavailable(sym, `session history load failed: ${e.message}`); }
+    }
+    const live = this.symbols.filter((s) => !this.s[s].unavailable);
+    this.connect('market', live.flatMap((s) => {
       const l = s.toLowerCase();
-      return [...CHART_INTERVALS.map((i) => `${l}@kline_${i}`), `${l}@ticker`, `${l}@markPrice@1s`];
+      const extra = this.s[s].session ? [`${l}@kline_${this.s[s].session.interval}`] : [];
+      return [...CHART_INTERVALS.map((i) => `${l}@kline_${i}`), ...extra, `${l}@ticker`, `${l}@markPrice@1s`];
     }));
-    this.connect('public', this.symbols.map((s) => `${s.toLowerCase()}@depth20@500ms`));
+    this.connect('public', live.map((s) => `${s.toLowerCase()}@depth20@500ms`));
     setInterval(() => this.watchdog(), 5000);
     setInterval(() => this.loadExchangeInfo().catch((e) => this.log.warn(`exchangeInfo refresh failed: ${e.message}`, 'API_ERROR')), 3600_000);
   }
@@ -52,6 +67,51 @@ export class MarketData extends EventEmitter {
       if (this.symbols.includes(s.symbol)) this.filters[s.symbol] = parseSymbolFilters(s);
     }
     this.log.info(`Exchange info loaded: ${Object.values(this.filters).map((f) => `${f.symbol} step=${f.stepSize} minNotional=${f.minNotional} ${f.status}`).join(', ')}`);
+  }
+
+  markUnavailable(sym, reason) {
+    this.s[sym].unavailable = reason;
+    this.log.error(`${sym} unavailable: ${reason} — other symbols continue`, 'SYMBOL_UNAVAILABLE');
+  }
+
+  // QQQ: build US regular-session daily candles from Binance 30m bars.
+  async loadSession(sym) {
+    const st = this.s[sym];
+    await st.session.fetchRange(SYMBOL_META[sym].listedAt);
+    st.daily = st.session.sessions(0);
+    st.lastSessionT = st.daily.length ? st.daily[st.daily.length - 1].t : 0;
+    const last = st.session.sortedBars().at(-1);
+    if (last && !st.last) st.last = last.c;
+    this.log.info(`${sym} US-session candles built: ${st.daily.length} sessions from Binance ${st.session.interval} bars (native history LIMITED since listing)`);
+  }
+
+  async checkSessionClose(sym, reason = 'session close') {
+    const st = this.s[sym];
+    if (!st.session || st.unavailable || st._sessionBusy) return;
+    st._sessionBusy = true;
+    try {
+      let fresh = st.session.sessions(st.lastSessionT);
+      fresh = fresh.filter((c) => c.t > st.lastSessionT);
+      if (!fresh.length) return;
+      if (fresh.some((c) => c.bars < c.expectedBars)) {
+        await st.session.fetchRange(fresh[0].t - 60 * 60_000); // fill ws gaps via REST
+        fresh = st.session.sessions(st.lastSessionT).filter((c) => c.t > st.lastSessionT);
+      }
+      for (const c of fresh) {
+        if (c.bars < c.expectedBars) this.log.warn(`${sym} session ${c.day}: ${c.bars}/${c.expectedBars} bars available`, 'DATA_GAP');
+        st.lastSessionT = c.t;
+        this.appendClosed(sym, c, `US session ${c.day} close (${reason})`);
+      }
+    } catch (e) {
+      this.log.error(`${sym} session close processing failed: ${e.message}`, 'API_ERROR');
+    } finally {
+      st._sessionBusy = false;
+    }
+  }
+
+  underlyingStatus(sym) {
+    if (!this.s[sym]?.session) return null;
+    return marketStatus(Date.now(), this.getCalendar());
   }
 
   async loadDaily(sym) {
@@ -110,6 +170,14 @@ export class MarketData extends EventEmitter {
       const interval = d.k.i;
       this.emit('kline', { symbol: d.s, interval, candle: c, closed: d.k.x });
       this.updateChartCache(d.s, interval, c);
+      if (st.session && interval === st.session.interval) { st.session.onBar(c); return; }
+      if (st.session && interval === DAILY) {
+        // 24/7 Binance daily candle: price only — QQQ signals use US-session candles
+        st.last = c.c;
+        st.lastTs = this.lastUpdate;
+        this.emit('price', { symbol: d.s, price: c.c });
+        return;
+      }
       if (interval === DAILY) {
         st.last = c.c;
         st.lastTs = this.lastUpdate;
@@ -135,13 +203,13 @@ export class MarketData extends EventEmitter {
     }
   }
 
-  appendClosed(sym, c) {
+  appendClosed(sym, c, note = null) {
     const st = this.s[sym];
     const lastT = st.daily.length ? st.daily[st.daily.length - 1].t : 0;
     if (c.t <= lastT) return; // duplicate
     st.daily.push(c);
     if (st.daily.length > DAILY_HISTORY + 50) st.daily.splice(0, st.daily.length - DAILY_HISTORY);
-    this.log.info(`${sym.replace('USDT', '')} daily candle closed C=${c.c}`);
+    this.log.info(`${sym.replace('USDT', '')} ${note || 'daily candle closed'} C=${c.c}`);
     this.emit('dailyClose', { symbol: sym, candle: c });
   }
 
@@ -149,6 +217,7 @@ export class MarketData extends EventEmitter {
   async resyncDaily(reason) {
     for (const sym of this.symbols) {
       const st = this.s[sym];
+      if (st.session) { this.checkSessionClose(sym, reason); continue; }
       const lastT = st.daily.length ? st.daily[st.daily.length - 1].t : 0;
       try {
         const rows = (await this.rest.klines(sym, DAILY, 5)).map(toCandle);
@@ -168,6 +237,11 @@ export class MarketData extends EventEmitter {
     const now = Date.now();
     for (const sym of this.symbols) {
       const st = this.s[sym];
+      if (st.session && now - (st._lastSessionCheck || 0) >= 30_000) { st._lastSessionCheck = now; this.checkSessionClose(sym); }
+    }
+    for (const sym of this.symbols) {
+      const st = this.s[sym];
+      if (st.session) continue;
       // forming candle end passed but no close event within 10s -> resync
       if (st.forming && now > st.forming.T + 10_000) {
         st.forming = null;
@@ -184,6 +258,11 @@ export class MarketData extends EventEmitter {
 
   // Chart data: REST fetch cached then kept updated by ws.
   async chartKlines(sym, interval, limit = 1000) {
+    if (interval === SESSION_INTERVAL) {
+      const st = this.s[sym];
+      if (!st.session) throw new Error('US session candles only for session symbols');
+      return st.daily.map(({ t, o, h, l, c, v, T }) => ({ t, o, h, l, c, v, T }));
+    }
     const key = `${sym}:${interval}`;
     const cached = this.chartCache.get(key);
     if (cached && Date.now() - cached.fetched < 5 * 60_000 && cached.candles.length >= Math.min(limit, 900)) return cached.candles;

@@ -1,6 +1,13 @@
 # HIC Futures Terminal
 
-Binance USDT-M Perpetual Futures 기반 멀티전략 자동매매 트레이딩 터미널 (BTCUSDT / ETHUSDT / XRPUSDT).
+Binance USDT-M Perpetual Futures 기반 멀티자산·멀티전략 자동매매 트레이딩 터미널.
+
+```
+CRYPTO  BTCUSDT / ETHUSDT / XRPUSDT  → Turtle 20/10 · ADX 14/25 · TSMOM 30d   (UTC 일봉)
+TRADFI  QQQUSDT (Invesco QQQ 지수 perpetual) → EMA 50/150 · TSMOM 126 · SMA200(옵션) · Turtle 50/20(옵션)   (미국 정규장 세션)
+SELF-IMPROVING CONTROLLER → 두 자산군의 주문 배수만 조절
+EXECUTION → Binance Futures
+```
 
 | 전략 | 방향 | 진입 | 청산 | Emergency Stop (기본) |
 |---|---|---|---|---|
@@ -78,6 +85,26 @@ Bot Running, Strategy Enabled, Short Enabled, 모드, 거래소 연결, 데이�
 - Trigger 가격 기준: `CONTRACT_PRICE`(최근 체결가, 기본) 또는 `MARK_PRICE` — Strategies › General에서 변경.
 - Binance Stop은 STOP ALL BOTS 후에도 거래소에 남아 있습니다.
 
+## QQQUSDT (TradFi index perpetual)
+
+- Binance QQQUSDT(2026-04-06 상장)를 주문 대상으로 씁니다. 종목 메타데이터: `asset_class=TRADFI_INDEX`, `market_type=USDM_PERPETUAL`, `underlying=Invesco QQQ Trust`.
+- **LONG / CASH 전용**입니다. QQQ 전략은 Short 신호를 만들지 않고, 설정에서도 Short를 켤 수 없습니다. ADX는 QQQ에 적용하지 않습니다.
+
+| 전략 | 기본 | 진입 | 청산 |
+|---|---|---|---|
+| QQQ_EMA_TREND | ON, 300 USDT | EMA50 > EMA150 | EMA50 <= EMA150 → CASH |
+| QQQ_TSMOM | ON, 250 USDT | 126세션 누적 로그수익률 > 0 (63/126/189/252 선택) | <= 0 → CASH |
+| QQQ_SMA200 | OFF | 종가 > SMA200 | 종가 <= SMA200 |
+| QQQ_TURTLE_50_20 | OFF | 종가 > 이전 50세션 고가 | 종가 < 이전 20세션 저가 |
+
+- EMA / TSMOM에는 선택 사항으로 SMA200 진입 필터(기본 OFF)가 있습니다.
+- Emergency Stop 기본: ATR(20) × 2.5, 5~12%. 고정 Take Profit 기본 OFF. 레버리지는 Crypto와 별도(`Leverage TradFi`, 기본 1x)입니다.
+- **신호 시간**: QQQ 전략은 UTC 일봉이 아니라 **미국 정규장(America/New_York 09:30–16:00, 조기폐장 13:00) 종가 기준 세션 일봉**으로 계산합니다. 세션 일봉은 Binance QQQUSDT 30분봉 중 정규장 시간만 모아 만들고, 정규장 종료 후 한 번만 평가합니다. 장외 가격 변동은 신호에 쓰지 않지만 Stop은 24시간 동작합니다. NYSE 휴장일·조기폐장은 `config.json`의 `general.usCalendar`에 있습니다(2026–2027 수록, 이후 연도는 추가 필요).
+- **데이터 한계**: Binance QQQUSDT 자체 이력은 2026-04 이후뿐이라(`nativeHistory: LIMITED`) EMA150(152세션), TSMOM 126(128세션), SMA200(202세션)은 세션이 충분히 쌓일 때까지 "insufficient session history"로 대기합니다. ETF 과거 데이터를 섞지 않습니다. `SignalDataProvider` / `ExecutionDataProvider` 구조로 향후 QQQ ETF 세션 데이터로 교체할 수 있습니다.
+- Funding은 Crypto와 같은 엔진으로 포지션별 기록합니다(Trading PnL / Fee / Funding / Net PnL).
+- 화면: Watchlist CRYPTO / TRADFI 구분, `US OPEN/CLOSED` 표시, QQQ 전략 패널(LONG/CASH, SMA200 ABOVE/BELOW), `US 1D` 세션 차트, 자산군별 Exposure·PnL.
+- QQQ 데이터 로드에 실패하거나 거래소에 종목이 없으면 QQQ만 `UNAVAILABLE`이 되고 Crypto 거래는 계속됩니다.
+
 ## Self-Improving Controller (V1)
 
 전략 위에 얹은 관리 계층입니다. **매매 신호를 만들지 않고**, 전략별·방향별로 신규 진입 주문금액의 배수만 정합니다.
@@ -113,6 +140,8 @@ Market Data → Turtle / ADX / TSMOM (기존 신호) → Controller (배수) →
 - 전략 간 수익률 상관계수와 코인별 Gross Exposure를 계산해 표시합니다. 상관 Guard는 기본 OFF, 코인 노출이 Equity의 50%를 넘으면 해당 전략 BOOST를 막습니다.
 - 재평가 주기 기본 7일(1/7/14/30일 선택). 모든 결정은 사유와 함께 `data/controller-history.jsonl`에 저장됩니다.
 - 파라미터 자동 최적화는 V1에 없습니다(`ParameterCandidateManager`는 비활성 자리표시자).
+- 자산군 분리: Crypto와 TradFi(QQQ)는 Regime(BTC / QQQ 세션)과 성과를 따로 평가하며 서로 순위를 비교하지 않습니다. QQQ 전략도 BOOSTED~PAUSED 상태를 가지지만 EMA 50/150, TSMOM 126은 고정입니다.
+- **설정 변경 기록**: Strategies에서 저장할 때마다 변경 내용을 History(`CONFIG_CHANGE`)와 Shadow 차트 마커로 남깁니다. 진입/청산/Stop 파라미터가 바뀌면 기본적으로 변경 이후 데이터만으로 평가하고(`resetHistoryOnParamChange`), 표에 변경 후 수익률과 변경 전 같은 기간 수익률을 나란히 표시합니다. 주문금액만 바꾼 경우는 평가 데이터를 유지합니다.
 
 ## 알아둘 제한사항
 
@@ -139,6 +168,11 @@ server/indicators.js  SMA, ATR, ADX(Wilder), 채널, 로그 모멘텀
 server/marketData.js  REST 초기 로드 + WebSocket(/market, /public 경로)
 server/binance.js     REST 클라이언트(HMAC 서명), 필터/수량 처리
 server/store.js       설정·상태·키 저장(data/)
+server/assets.js      종목 메타데이터(asset class, session, provider)
+server/session.js     미국 정규장 세션(America/New_York, 휴장일, 조기폐장)
+server/dataProviders.js  QQQ 세션 신호 데이터 provider
+server/strategiesTradfi.js  QQQ 전략(EMA / TSMOM / SMA200 / Turtle 50-20)
+server/strategyRegistry.js  자산군별 전략 매핑
 server/controller/    Self-Improving Controller (engine, 성과 평가, Regime, 결정 규칙, 저장, Shadow Portfolio)
 public/               터미널 UI (lightweight-charts)
 tools/mock-binance.js 개발용 가짜 거래소

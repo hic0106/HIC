@@ -2,8 +2,9 @@
 import { api, fPct, fNum, stepDecimals } from './util.js';
 
 const LC = window.LightweightCharts;
-const IV_MS = { '5m': 300e3, '15m': 900e3, '1h': 3600e3, '4h': 14400e3, '1d': 86400e3 };
-export const ST_COLOR = { TURTLE: '#f0b90b', ADX: '#3d8bfd', TSMOM: '#c77dff' };
+const IV_MS = { '5m': 300e3, '15m': 900e3, '1h': 3600e3, '4h': 14400e3, '1d': 86400e3, US1D: 86400e3 };
+export const ST_COLOR = { TURTLE: '#f0b90b', ADX: '#3d8bfd', TSMOM: '#c77dff', QQQ_EMA_TREND: '#26c6da', QQQ_TSMOM: '#ff8a65', QQQ_SMA200: '#9ccc65', QQQ_TURTLE_50_20: '#ffd54f' };
+const toggleKey = (st) => (st.startsWith('QQQ_') ? 'QQQ' : st);
 const TZ = -new Date().getTimezoneOffset() * 60; // display local time
 const toT = (ms) => Math.floor(ms / 1000) + TZ;
 
@@ -49,7 +50,7 @@ export class ChartView {
     this.data = rows.map((r) => ({ time: toT(r.t), open: r.o, high: r.h, low: r.l, close: r.c, v: r.v }));
     this.candle.setData(this.data.map(({ v, ...c }) => c));
     this.vol.setData(this.data.map((c) => ({ time: c.time, value: c.v, color: c.close >= c.open ? 'rgba(14,203,129,.35)' : 'rgba(246,70,93,.35)' })));
-    this.chart.applyOptions({ timeScale: { timeVisible: this.interval !== '1d' } });
+    this.chart.applyOptions({ timeScale: { timeVisible: this.interval !== '1d' && this.interval !== 'US1D' } });
     this.drawSma();
     this.markerSig = '';
     this.precisionKey = '';
@@ -111,7 +112,7 @@ export class ChartView {
     const want = new Set();
     const put = (k, o) => { want.add(k); this.setLine(k, o); };
     for (const p of snap.positions.filter((x) => x.symbol === sym)) {
-      if (!this.toggles[p.strategy]) continue;
+      if (!this.toggles[toggleKey(p.strategy)]) continue;
       const col = ST_COLOR[p.strategy];
       put(`E:${p.strategy}`, { price: p.entryPrice, color: col, lineStyle: LC.LineStyle.Solid, title: `${p.strategy} ${p.side} ${fPct(p.pricePct)}` });
       if (this.toggles.stops && p.stopPrice) put(`S:${p.strategy}`, { price: p.stopPrice, color: '#f6465d', lineStyle: LC.LineStyle.Dashed, title: `${p.strategy} STOP` });
@@ -130,8 +131,8 @@ export class ChartView {
     for (const [k, line] of this.lines) if (!want.has(k)) { this.candle.removePriceLine(line); this.lines.delete(k); }
 
     // trade markers (entries/exits) snapped to bar times
-    const trades = snap.trades.filter((t) => t.symbol === sym && this.toggles[t.strategy]);
-    const opens = snap.positions.filter((p) => p.symbol === sym && this.toggles[p.strategy]);
+    const trades = snap.trades.filter((t) => t.symbol === sym && this.toggles[toggleKey(t.strategy)]);
+    const opens = snap.positions.filter((p) => p.symbol === sym && this.toggles[toggleKey(p.strategy)]);
     const sig = `${this.interval}:${this.toggles.markers}:${trades.length}:${opens.map((p) => p.entryTime).join(',')}:${this.data.length ? this.data[0].time : 0}`;
     if (sig === this.markerSig) return;
     this.markerSig = sig;

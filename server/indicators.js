@@ -103,3 +103,17 @@ export function logMomentum(candles, i, lookback) {
   if (i - lookback < 0) return null;
   return Math.log(candles[i].c / candles[i - lookback].c);
 }
+
+// EMA seeded with the SMA of the first `period` values (null before that).
+export function ema(values, period) {
+  const out = new Array(values.length).fill(null);
+  if (values.length < period) return out;
+  const k = 2 / (period + 1);
+  let prev = values.slice(0, period).reduce((s, x) => s + x, 0) / period;
+  out[period - 1] = prev;
+  for (let i = period; i < values.length; i++) {
+    prev = values[i] * k + prev * (1 - k);
+    out[i] = prev;
+  }
+  return out;
+}

@@ -6,7 +6,7 @@
 //   Controller = base order × controller multiplier (0 … 1.25)
 // The baseline book is also the controller's performance data source: it is not distorted by
 // controller sizing and keeps accumulating while a strategy is PAUSED.
-import { STRATEGIES, STRATEGY_META, evaluate, stopDistancePct } from '../strategies.js';
+import { ALL_STRATEGIES as STRATEGIES, META as STRATEGY_META, evaluateStrategy as evaluate, stopDistancePct, strategiesForSymbol, STRATEGY_CLASS } from '../strategyRegistry.js';
 
 const dirOf = (side) => (side === 'LONG' ? 1 : -1);
 export const sideKey = (strategy, side) => `${strategy}:${side}`;
@@ -40,13 +40,14 @@ export class ShadowPortfolio {
   }
 
   onDailyClose(symbol, now = Date.now()) {
-    for (const st of STRATEGIES) this.processCandle(st, symbol, now);
+    for (const st of strategiesForSymbol(symbol)) this.processCandle(st, symbol, now);
   }
 
   processCandle(strategy, symbol, now = Date.now()) {
     const cfg = this.getConfig();
     const scfg = cfg.strategies[strategy];
     if (!scfg.enabled) return; // mirrors the engine: disabled strategies do not act
+    if (!this.md.s[symbol] || this.md.s[symbol].unavailable) return;
     const sig = evaluate(strategy, this.md.s[symbol].daily, scfg);
     if (!sig.ready) return;
     const slot = this.slot(strategy, symbol);
@@ -104,6 +105,8 @@ export class ShadowPortfolio {
     this.state.realized[k] = (this.state.realized[k] || 0) + ret;
     this.state.realizedUsdt.baseline += t.pnlBaseline;
     this.state.realizedUsdt.controller += t.pnlController;
+    const rc = ((this.state.realizedByClass ||= {})[STRATEGY_CLASS[strategy]] ||= { baseline: 0, controller: 0 });
+    rc.baseline += t.pnlBaseline; rc.controller += t.pnlController;
     this.state.trades.push(t);
     if (this.state.trades.length > 3000) this.state.trades.splice(0, this.state.trades.length - 3000);
     slot.pos = null;
@@ -114,7 +117,7 @@ export class ShadowPortfolio {
   onPrice(symbol, price, now = Date.now()) {
     if (now - (this.lastTick[symbol] || 0) < 1000) return;
     this.lastTick[symbol] = now;
-    for (const st of STRATEGIES) {
+    for (const st of strategiesForSymbol(symbol)) {
       const pos = this.state.slots[`${st}:${symbol}`]?.pos;
       if (!pos) continue;
       const d = dirOf(pos.side);
@@ -125,7 +128,7 @@ export class ShadowPortfolio {
 
   onFunding({ symbol, time, rate }) {
     if (!this.getConfig().general.includeFunding) return;
-    for (const st of STRATEGIES) {
+    for (const st of strategiesForSymbol(symbol)) {
       const pos = this.state.slots[`${st}:${symbol}`]?.pos;
       if (pos && pos.entryTime < time) pos.funding += rate * dirOf(pos.side);
     }
@@ -136,6 +139,8 @@ export class ShadowPortfolio {
     const cum = {}, open = {};
     for (const st of STRATEGIES) for (const side of ['LONG', 'SHORT']) { const k = sideKey(st, side); cum[k] = this.state.realized[k] || 0; open[k] = 0; }
     let ub = 0, uc = 0;
+    const cls = {};
+    for (const [c, v] of Object.entries(this.state.realizedByClass || {})) cls[c] = { baseline: v.baseline, controller: v.controller };
     for (const [k, s] of Object.entries(this.state.slots)) {
       if (!s.pos) continue;
       const [st, sym] = k.split(':');
@@ -146,6 +151,8 @@ export class ShadowPortfolio {
       cum[sk] += u; open[sk]++;
       ub += u * s.pos.baseAmount;
       uc += u * s.pos.baseAmount * s.pos.mult;
+      const c = (cls[STRATEGY_CLASS[st]] ||= { baseline: 0, controller: 0 });
+      c.baseline += u * s.pos.baseAmount; c.controller += u * s.pos.baseAmount * s.pos.mult;
     }
     for (const k of Object.keys(cum)) {
       const arr = (this.state.series[k] ||= []);
@@ -153,7 +160,7 @@ export class ShadowPortfolio {
       if (arr.length && arr[arr.length - 1].day === day) arr[arr.length - 1] = pt; else arr.push(pt);
       if (arr.length > 800) arr.shift();
     }
-    const pf = { day, baseline: this.state.realizedUsdt.baseline + ub, controller: this.state.realizedUsdt.controller + uc };
+    const pf = { day, baseline: this.state.realizedUsdt.baseline + ub, controller: this.state.realizedUsdt.controller + uc, byClass: cls };
     const p = this.state.portfolio;
     if (p.length && p[p.length - 1].day === day) p[p.length - 1] = pf; else p.push(pf);
     if (p.length > 800) p.shift();

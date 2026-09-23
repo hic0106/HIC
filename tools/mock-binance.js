@@ -6,11 +6,22 @@ import { WebSocketServer } from 'ws';
 
 const PORT = Number(process.env.MOCK_PORT || 9901);
 const DAY = Number(process.env.MOCK_DAY_MS || 86_400_000);
-const INTERVALS = { '5m': 300_000, '15m': 900_000, '1h': 3_600_000, '4h': 14_400_000, '1d': DAY };
+const INTERVALS = { '5m': 300_000, '15m': 900_000, '30m': 1_800_000, '1h': 3_600_000, '4h': 14_400_000, '1d': DAY };
 const SYMS = {
   BTCUSDT: { p: 86000, vol: 0.03, step: '0.001', minQty: '0.001', minNotional: '100', tick: '0.10' },
   ETHUSDT: { p: 3200, vol: 0.035, step: '0.001', minQty: '0.001', minNotional: '20', tick: '0.01' },
   XRPUSDT: { p: 2.4, vol: 0.045, step: '0.1', minQty: '0.1', minNotional: '5', tick: '0.0001' },
+  // TradFi index perpetual (listed 2026-04-06); deterministic 30m path so history pages are consistent
+  QQQUSDT: { p: 600, vol: 0.012, step: '0.01', minQty: '0.01', minNotional: '5', tick: '0.01', tradfi: true },
+};
+const QQQ_LISTED = Date.UTC(2026, 3, 6);
+const qqqPrice = (t) => {
+  const d = (t - QQQ_LISTED) / 86_400_000;
+  return 520 * Math.exp(0.0009 * d + 0.04 * Math.sin(d / 23) + 0.01 * Math.sin(t / 5_400_000));
+};
+const qqqBar = (t, ms) => {
+  const o = qqqPrice(t), c = qqqPrice(t + ms);
+  return [t, o, Math.max(o, c) * 1.0008, Math.min(o, c) * 0.9992, c, 50 + (t / ms) % 40, t + ms - 1];
 };
 
 let seed = 42;
@@ -36,9 +47,17 @@ for (const [s, c] of Object.entries(SYMS)) {
   hist[s] = { daily: arr, price: p, forming: { t: dayStart, o: p, h: p, l: p, c: p, v: 0 }, funding: 0.0001, nextFunding: Math.ceil(now0 / (DAY / 3)) * (DAY / 3) };
 }
 
-function klines(sym, interval, limit) {
+function klines(sym, interval, limit, startTime) {
   const ms = INTERVALS[interval];
   const h = hist[sym];
+  if (SYMS[sym].tradfi && interval !== '1d') {
+    const now = Date.now();
+    const lastOpen = Math.floor(now / ms) * ms;
+    let t0 = startTime ? Math.ceil(Math.max(startTime, QQQ_LISTED) / ms) * ms : lastOpen - (limit - 1) * ms;
+    const out = [];
+    for (let t = t0; t <= lastOpen && out.length < limit; t += ms) out.push(qqqBar(t, ms));
+    return out;
+  }
   if (interval === '1d') {
     const rows = [...h.daily, h.forming].slice(-limit);
     return rows.map((k) => [k.t, k.o, k.h, k.l, k.c, k.v, k.t + DAY - 1]);
@@ -82,10 +101,13 @@ const server = http.createServer((req, res) => {
   if (priv && !req.headers['x-mbx-apikey']) return json(res, 401, { code: -2015, msg: 'Invalid API-key' });
   if (p === '/fapi/v1/time') return json(res, 200, { serverTime: Date.now() });
   if (p === '/fapi/v1/exchangeInfo') {
-    return json(res, 200, { symbols: Object.entries(SYMS).map(([s, c]) => ({ symbol: s, status: 'TRADING', contractType: 'PERPETUAL', quantityPrecision: 3, pricePrecision: 2,
+    return json(res, 200, { symbols: Object.entries(SYMS).map(([s, c]) => ({ symbol: s, status: 'TRADING', contractType: c.tradfi ? 'TRADIFI_PERPETUAL' : 'PERPETUAL', quantityPrecision: 3, pricePrecision: 2,
       filters: [{ filterType: 'PRICE_FILTER', tickSize: c.tick }, { filterType: 'LOT_SIZE', stepSize: c.step, minQty: c.minQty, maxQty: '1000000' }, { filterType: 'MARKET_LOT_SIZE', stepSize: c.step, minQty: c.minQty, maxQty: '100000' }, { filterType: 'MIN_NOTIONAL', notional: c.minNotional }] })) });
   }
-  if (p === '/fapi/v1/klines') return json(res, 200, klines(q.symbol, q.interval, Math.min(1500, Number(q.limit || 500))));
+  if (p === '/fapi/v1/klines') {
+    if (!SYMS[q.symbol]) return json(res, 400, { code: -1121, msg: 'Invalid symbol.' });
+    return json(res, 200, klines(q.symbol, q.interval, Math.min(1500, Number(q.limit || 500)), q.startTime ? Number(q.startTime) : null));
+  }
   if (p === '/fapi/v3/account') {
     const u2 = unreal();
     return json(res, 200, { totalWalletBalance: String(acct.wallet), totalUnrealizedProfit: String(u2), totalMarginBalance: String(acct.wallet + u2), availableBalance: String(acct.wallet + u2 - margin()),
@@ -168,7 +190,8 @@ setInterval(() => {
       h.forming = { t: f.t + DAY, o: f.c, h: f.c, l: f.c, c: f.c, v: 0 };
     }
     const dt = 0.5 / (DAY / 1000);
-    h.price *= Math.exp(c.vol * Math.sqrt(dt) * gauss() * (DAY < 86_400_000 ? 1 : 3) + Math.sin(now / DAY / 7) * 0.02 * dt);
+    if (c.tradfi) h.price = qqqPrice(now);
+    else h.price *= Math.exp(c.vol * Math.sqrt(dt) * gauss() * (DAY < 86_400_000 ? 1 : 3) + Math.sin(now / DAY / 7) * 0.02 * dt);
     for (const a of Object.values(algos)) {
       if (a.symbol !== s || a.algoStatus !== 'NEW') continue;
       const px = a.workingType === 'MARK_PRICE' ? h.price * 1.0001 : h.price;

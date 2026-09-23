@@ -6,14 +6,19 @@ export const DATA_DIR = path.resolve(process.env.HIC_DATA_DIR || './data');
 fs.mkdirSync(DATA_DIR, { recursive: true });
 fs.mkdirSync(path.join(DATA_DIR, 'logs'), { recursive: true });
 
-export const SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'XRPUSDT'];
+import { SYMBOLS } from './assets.js';
+import { DEFAULT_US_CALENDAR } from './session.js';
+
+export { SYMBOLS };
 
 const amounts = (long, short) => ({ PAPER: { long, short }, LIVE: { long, short } });
 
 export const DEFAULT_CONFIG = {
   general: {
     mode: 'PAPER', // PAPER | LIVE (selected trading engine; bot RUNNING/STOPPED is separate)
-    leverage: 1,
+    leverage: 1, // crypto symbols
+    leverageTradfi: 1, // QQQUSDT (TradFi index perpetual)
+    usCalendar: DEFAULT_US_CALENDAR, // NYSE holidays / early closes for QQQ signal sessions
     takerFeePct: 0.05,
     makerFeePct: 0.02,
     slippagePct: 0.05,
@@ -44,10 +49,16 @@ export const DEFAULT_CONFIG = {
       correlationThreshold: 0.85, correlationGuard: false,
       maxCoinExposurePctForBoost: 50,
     },
-    regime: { volHighPct: 80, atrHighPct: 6, adxTrend: 20, sidewaysRet30Pct: 5 },
+    regime: { volHighPct: 80, atrHighPct: 6, adxTrend: 20, sidewaysRet30Pct: 5 }, // CRYPTO (BTC)
+    regimeTradfi: { volHighPct: 35, atrHighPct: 3, adxTrend: 20, sidewaysRet30Pct: 3 }, // TRADFI (QQQ sessions)
+    // after an entry/exit/stop PARAMETER change, evaluate only data since the change (starts again at NORMAL)
+    resetHistoryOnParamChange: true,
     boostRegimes: { LONG: ['BULL_TREND', 'NORMAL'], SHORT: ['BEAR_TREND'] },
     // optional hard maximum USDT per order (null = none)
-    maxOrderUsdt: { TURTLE: { LONG: null, SHORT: null }, ADX: { LONG: null, SHORT: null }, TSMOM: { LONG: null, SHORT: null } },
+    maxOrderUsdt: {
+      TURTLE: { LONG: null, SHORT: null }, ADX: { LONG: null, SHORT: null }, TSMOM: { LONG: null, SHORT: null },
+      QQQ_EMA_TREND: { LONG: null, SHORT: null }, QQQ_TSMOM: { LONG: null, SHORT: null }, QQQ_SMA200: { LONG: null, SHORT: null }, QQQ_TURTLE_50_20: { LONG: null, SHORT: null },
+    },
   },
   strategies: {
     TURTLE: {
@@ -73,6 +84,31 @@ export const DEFAULT_CONFIG = {
       params: { lookback: 30 },
       stop: { mode: 'ATR_DYNAMIC', atrPeriod: 20, atrMult: 3.0, minPct: 10, maxPct: 22, fixedPct: 15 },
       takeProfit: { enabled: false, pct: 40 },
+    },
+    // ---- TRADFI (QQQUSDT): LONG / CASH only, signals on US regular-session closes
+    QQQ_EMA_TREND: {
+      enabled: true, shortEnabled: false, amounts: amounts(300, 0),
+      params: { fastEma: 50, slowEma: 150, sma200Filter: false },
+      stop: { mode: 'ATR_DYNAMIC', atrPeriod: 20, atrMult: 2.5, minPct: 5, maxPct: 12, fixedPct: 8 },
+      takeProfit: { enabled: false, pct: 20 },
+    },
+    QQQ_TSMOM: {
+      enabled: true, shortEnabled: false, amounts: amounts(250, 0),
+      params: { lookback: 126, sma200Filter: false },
+      stop: { mode: 'ATR_DYNAMIC', atrPeriod: 20, atrMult: 2.5, minPct: 5, maxPct: 12, fixedPct: 8 },
+      takeProfit: { enabled: false, pct: 20 },
+    },
+    QQQ_SMA200: {
+      enabled: false, shortEnabled: false, amounts: amounts(250, 0),
+      params: { smaPeriod: 200 },
+      stop: { mode: 'ATR_DYNAMIC', atrPeriod: 20, atrMult: 2.5, minPct: 5, maxPct: 12, fixedPct: 8 },
+      takeProfit: { enabled: false, pct: 20 },
+    },
+    QQQ_TURTLE_50_20: {
+      enabled: false, shortEnabled: false, amounts: amounts(250, 0),
+      params: { entryPeriod: 50, exitPeriod: 20 },
+      stop: { mode: 'ATR_DYNAMIC', atrPeriod: 20, atrMult: 2.5, minPct: 5, maxPct: 12, fixedPct: 8 },
+      takeProfit: { enabled: false, pct: 20 },
     },
   },
 };

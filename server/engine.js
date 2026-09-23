@@ -1,8 +1,9 @@
 // Trading engine: strategy evaluation, pre-trade checks, paper/live execution,
 // emergency stops, funding, PnL accounting and UI snapshot.
 import { BinanceClient, BinanceError, endpoints, floorToStep, fmtQty, roundToTick, fmtPrice } from './binance.js';
-import { STRATEGIES, STRATEGY_META, evaluate, stopDistancePct } from './strategies.js';
+import { ALL_STRATEGIES as STRATEGIES, META as STRATEGY_META, evaluateStrategy as evaluate, stopDistancePct, strategiesForSymbol, STRATEGY_CLASS } from './strategyRegistry.js';
 import { SYMBOLS, emptyModeState } from './store.js';
+import { SYMBOL_META, assetClassOf, ASSET_CLASSES } from './assets.js';
 
 const slotKey = (st, sym) => `${st}:${sym}`;
 const dirOf = (side) => (side === 'LONG' ? 1 : -1);
@@ -62,6 +63,14 @@ export class Engine {
     }
     return ms.slots[k];
   }
+
+  // Leverage is set by the user per asset class (default 1x). Nothing raises it automatically.
+  leverageFor(symbol) {
+    const g = this.cfg.general;
+    return Number(assetClassOf(symbol) === 'CRYPTO' ? g.leverage : (g.leverageTradfi ?? 1));
+  }
+
+  symbolAvailable(sym) { return !!this.md.filters[sym] && !this.md.s[sym]?.unavailable; }
 
   // BASE ORDER AMOUNT set by the user. Never modified by the controller.
   amountFor(strategy, side, mode = this.mode) {
@@ -156,6 +165,7 @@ export class Engine {
       const pm = await c.positionMode();
       this.live.hedgeMode = !!pm.dualSidePosition;
       for (const sym of SYMBOLS) {
+        if (!this.symbolAvailable(sym)) continue;
         const conf = await c.symbolConfig(sym);
         const row = Array.isArray(conf) ? conf.find((x) => x.symbol === sym) : conf;
         this.live.leverage[sym] = row ? Number(row.leverage) : null;
@@ -181,9 +191,9 @@ export class Engine {
       return { ok: false, msg };
     }
     if (forStart) {
-      const lev = Number(this.cfg.general.leverage);
       for (const sym of SYMBOLS) {
-        const r = await this.ensureLeverage(sym, lev);
+        if (!this.symbolAvailable(sym)) continue;
+        const r = await this.ensureLeverage(sym, this.leverageFor(sym));
         if (!r.ok) return r;
       }
     }
@@ -258,7 +268,7 @@ export class Engine {
   }
 
   async evaluateSymbol(symbol, trigger) {
-    for (const st of STRATEGIES) {
+    for (const st of strategiesForSymbol(symbol)) {
       try { await this.evaluateSlot(st, symbol, trigger); } catch (e) { this.log.error(`${st} ${symbol} evaluation error: ${e.message}`, 'ENGINE_ERROR'); }
     }
   }
@@ -376,7 +386,7 @@ export class Engine {
     const notional = qty * price;
     if (notional < f.minNotional) return fail('BELOW_MIN_NOTIONAL', `${symbol} notional ${notional.toFixed(2)} < min ${f.minNotional} USDT`);
 
-    const lev = Number(g.leverage);
+    const lev = this.leverageFor(symbol);
     let available;
     if (this.mode === 'LIVE') {
       try { available = (await this.refreshLiveAccount()).available; } catch (e) { return fail('EXCHANGE_DISCONNECTED', `account read failed: ${e.message}`); }
@@ -561,7 +571,7 @@ export class Engine {
         strategy: slot.strategy, symbol: slot.symbol, side, entryPrice: fill.avgPrice, qty: fill.executedQty,
         orderAmount: pend.amount, baseAmount: pend.baseAmount ?? pend.amount, ctrlMultiplier: pend.ctrlMultiplier ?? 1, ctrlStatus: pend.ctrlStatus ?? 'OFF', entryNotional: fill.avgPrice * fill.executedQty, entryFee: fill.fee, funding: 0,
         entryTime: Date.now(), stopPrice, stopPct: distPct, stopMode: scfg.stop.mode, tpPrice, atrAtEntry: pend.atr,
-        leverage: Number(this.cfg.general.leverage), clientOrderId: order.clientOrderId,
+        leverage: this.leverageFor(slot.symbol), clientOrderId: order.clientOrderId,
       };
       slot.status = side;
       slot.lastSignal = `${side} ENTRY`;
@@ -655,7 +665,7 @@ export class Engine {
     this.lastTickCheck[symbol] = now;
     const active = this.runState === 'RUNNING' || this.cfg.general.stopsActiveWhenStopped;
     if (!active) return;
-    for (const st of STRATEGIES) {
+    for (const st of strategiesForSymbol(symbol)) {
       const slot = this.ms().slots[slotKey(st, symbol)];
       const pos = slot?.position;
       if (!pos || slot.pending || this.busy.has(slotKey(st, symbol))) continue;
@@ -921,8 +931,17 @@ export class Engine {
       b.pnl += p.pnl; b.count++;
     }
     for (const b of Object.values(bySymbol)) b.net = b.long - b.short;
+    // asset-class split (CRYPTO vs TRADFI): exposure + PnL (realized from closed trades + open net)
+    const byClass = {};
+    for (const c of ASSET_CLASSES) byClass[c] = { long: 0, short: 0, net: 0, gross: 0, unrealized: 0, realized: 0, pnl: 0, positions: 0 };
+    for (const [sym, b] of Object.entries(bySymbol)) {
+      const k = byClass[assetClassOf(sym)];
+      k.long += b.long; k.short += b.short; k.unrealized += b.pnl; k.positions += b.count;
+    }
+    for (const t of ms.trades) byClass[assetClassOf(t.symbol)].realized += t.netPnl;
+    for (const k of Object.values(byClass)) { k.net = k.long - k.short; k.gross = k.long + k.short; k.pnl = k.realized + k.unrealized; }
     return {
-      mode, ...acct, invested: pos.reduce((a, p) => a + p.entryNotional, 0),
+      mode, ...acct, invested: pos.reduce((a, p) => a + p.entryNotional, 0), grossExp: longExp + shortExp, byClass,
       todayPnl: totalPnl - ms.daySnap.totalPnl, totalPnl, totalReturnPct: base ? (totalPnl / base) * 100 : null, baseCapital: base,
       realized: ms.realizedTotal || 0, unrealizedNet: openNet,
       longExp, shortExp, netExp: longExp - shortExp, bySymbol, positionsCount: pos.length,
@@ -938,7 +957,7 @@ export class Engine {
       const sp = pos.filter((p) => p.strategy === st);
       const c = this.cfg.strategies[st];
       return {
-        strategy: st, enabled: c.enabled, shortEnabled: c.shortEnabled && STRATEGY_META[st].supportsShort,
+        strategy: st, assetClass: STRATEGY_CLASS[st], enabled: c.enabled, shortEnabled: c.shortEnabled && STRATEGY_META[st].supportsShort,
         longAmount: this.amountFor(st, 'LONG'), shortAmount: this.amountFor(st, 'SHORT'),
         longActual: this.controllerSizing(st, 'LONG', this.amountFor(st, 'LONG')).amount,
         shortActual: this.controllerSizing(st, 'SHORT', this.amountFor(st, 'SHORT')).amount,
@@ -954,10 +973,16 @@ export class Engine {
     const symbols = {};
     for (const sym of SYMBOLS) {
       const s = this.md.s[sym];
-      symbols[sym] = { price: s.last, ticker: s.ticker, mark: s.mark, depth: s.depth, filters: this.md.filters[sym] || null, lastTs: s.lastTs, sma200: null };
+      const meta = SYMBOL_META[sym];
+      symbols[sym] = {
+        price: s.last, ticker: s.ticker, mark: s.mark, depth: s.depth, filters: this.md.filters[sym] || null, lastTs: s.lastTs, sma200: null,
+        assetClass: meta.asset_class, marketType: meta.market_type, underlying: meta.underlying, session: meta.session,
+        nativeHistory: meta.nativeHistory || 'FULL', unavailable: s.unavailable || null, signalCandles: s.daily.length,
+        underlyingMarket: this.md.underlyingStatus ? this.md.underlyingStatus(sym) : null,
+      };
     }
     const slots = [];
-    for (const st of STRATEGIES) for (const sym of SYMBOLS) {
+    for (const sym of SYMBOLS) for (const st of strategiesForSymbol(sym)) {
       const s = this.slot(st, sym);
       slots.push({ strategy: st, symbol: sym, status: this.cfg.strategies[st].enabled ? s.status : (s.position ? s.status : 'OFF'), position: s.position, pending: s.pending, view: s.view, signal: s.signal, evalCandle: s.evalCandle, lastSignal: s.lastSignal, block: s.block, exitRule: STRATEGY_META[st].exitRule(this.cfg.strategies[st].params) });
     }

@@ -6,7 +6,7 @@ export const REGIMES = ['BULL_TREND', 'BEAR_TREND', 'SIDEWAYS', 'HIGH_VOLATILITY
 
 export function detectRegime(candles, cfg) {
   const n = candles.length;
-  if (n < 201) return { regime: 'NORMAL', inputs: {}, reasons: [`insufficient BTC history (${n} daily candles)`] };
+  if (n < 201) return { regime: 'NORMAL', inputs: {}, reasons: [`insufficient history (${n} daily candles, need 201)`] };
   const i = n - 1;
   const c = candles.map((k) => k.c);
   const price = c[i];
