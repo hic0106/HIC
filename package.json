@@ -1,0 +1,27 @@
+{
+  "name": "hic-terminal",
+  "version": "1.0.0",
+  "description": "Binance USDT-M Futures multi-strategy auto trading terminal (Turtle / ADX / TSMOM)",
+  "type": "module",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "mock": "node tools/mock-binance.js",
+    "dev:mock": "node tools/dev-mock.js",
+    "test": "node --test test/*.test.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hic0106/HIC.git"
+  },
+  "license": "UNLICENSED",
+  "private": true,
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "express": "^5.2.1",
+    "lightweight-charts": "^5.2.1",
+    "ws": "^8.21.3"
+  }
+}
