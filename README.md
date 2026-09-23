@@ -28,6 +28,13 @@ npm install
 npm start
 ```
 
+Windows에서는 `start.bat`을 더블클릭하면 서버 실행과 브라우저 열기를 한 번에 합니다(창을 닫으면 종료). 바탕화면 바로가기 만들기(PowerShell):
+
+```powershell
+$s = (New-Object -ComObject WScript.Shell).CreateShortcut("$([Environment]::GetFolderPath('Desktop'))\HIC Terminal.lnk")
+$s.TargetPath = "$HOME\HIC\start.bat"; $s.WorkingDirectory = "$HOME\HIC"; $s.Save()
+```
+
 브라우저에서 `http://127.0.0.1:8420` 접속 (1920×1080 기준 레이아웃). 서버는 기본적으로 localhost에만 바인딩됩니다. 포트 변경: `PORT=9000 npm start`.
 
 프로그램을 실행하면 항상 **STOPPED** 상태로 시작합니다. 상단 `▶ START`를 눌러야 전략이 실행됩니다. 처음 모드는 **PAPER**입니다.
