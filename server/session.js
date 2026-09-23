@@ -79,3 +79,13 @@ export function buildSessionCandle(session, bars) {
     v: inside.reduce((s, b) => s + b.v, 0), bars: inside.length,
   };
 }
+
+// First US regular session whose close is after `now` (DST / holidays / early closes via calendar).
+export function nextSessionClose(now = Date.now(), cal = DEFAULT_US_CALENDAR) {
+  const today = nyParts(now).day;
+  for (let i = 0; i < 15; i++) {
+    const s = usSession(addDays(today, i), cal);
+    if (s && s.close > now) return s;
+  }
+  return null;
+}

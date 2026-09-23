@@ -314,7 +314,7 @@ test('config change marker: recorded in history; parameter change separates eval
   assert.equal(c.metricsFor('TURTLE', 'LONG').historyDays, 200);
 });
 
-test('market data: QQQ session close emits one dailyClose per US session (not per UTC day)', async () => {
+test('market data: QQQ session close emits one US_SESSION candleClose per US session (not per UTC day)', async () => {
   const { MarketData } = await import('../server/marketData.js');
   const log = new Logger(new Store());
   const md = new MarketData(['QQQUSDT'], log, { getCalendar: () => DEFAULT_CONFIG.general.usCalendar });
@@ -330,13 +330,14 @@ test('market data: QQQ session close emits one dailyClose per US session (not pe
   const n = st.daily.length;
   assert.ok(n >= 5 && n <= 8, `~7 US sessions in 10 days (got ${n})`);
   const closes = [];
-  md.on('dailyClose', (e) => closes.push(e));
+  md.on('candleClose', (e) => closes.push(e));
   // pretend the last session had not been processed yet
   const last = st.daily.pop();
   st.lastSessionT = st.daily.at(-1).t;
   await md.checkSessionClose('QQQUSDT');
   assert.equal(closes.length, 1);
   assert.equal(closes[0].candle.day, last.day);
+  assert.equal(closes[0].interval, 'US_SESSION');
   await md.checkSessionClose('QQQUSDT');
   assert.equal(closes.length, 1, 'no duplicate / no off-hours recalculation');
 });

@@ -6,7 +6,10 @@ import { WebSocketServer } from 'ws';
 
 const PORT = Number(process.env.MOCK_PORT || 9901);
 const DAY = Number(process.env.MOCK_DAY_MS || 86_400_000);
-const INTERVALS = { '5m': 300_000, '15m': 900_000, '30m': 1_800_000, '1h': 3_600_000, '4h': 14_400_000, '1d': DAY };
+// intraday candles scale with the accelerated day (QQQ 30m bars stay real-time: US session calendar)
+const F = DAY / 86_400_000;
+const INTERVALS = { '5m': 300_000 * F, '15m': 900_000 * F, '30m': 1_800_000 * F, '1h': 3_600_000 * F, '4h': 14_400_000 * F, '1d': DAY };
+const QQQ_MS = { '5m': 300_000, '15m': 900_000, '30m': 1_800_000, '1h': 3_600_000, '4h': 14_400_000 };
 const SYMS = {
   BTCUSDT: { p: 86000, vol: 0.03, step: '0.001', minQty: '0.001', minNotional: '100', tick: '0.10' },
   ETHUSDT: { p: 3200, vol: 0.035, step: '0.001', minQty: '0.001', minNotional: '20', tick: '0.01' },
@@ -48,7 +51,7 @@ for (const [s, c] of Object.entries(SYMS)) {
 }
 
 function klines(sym, interval, limit, startTime) {
-  const ms = INTERVALS[interval];
+  const ms = SYMS[sym].tradfi && QQQ_MS[interval] ? QQQ_MS[interval] : INTERVALS[interval];
   const h = hist[sym];
   if (SYMS[sym].tradfi && interval !== '1d') {
     const now = Date.now();
@@ -97,7 +100,7 @@ const server = http.createServer((req, res) => {
   const u = new URL(req.url, `http://${req.headers.host}`);
   const q = Object.fromEntries(u.searchParams);
   const p = u.pathname;
-  const priv = p !== '/fapi/v1/time' && p !== '/fapi/v1/exchangeInfo' && p !== '/fapi/v1/klines';
+  const priv = p !== '/fapi/v1/time' && p !== '/fapi/v1/exchangeInfo' && p !== '/fapi/v1/klines' && !p.startsWith('/mock/');
   if (priv && !req.headers['x-mbx-apikey']) return json(res, 401, { code: -2015, msg: 'Invalid API-key' });
   if (p === '/fapi/v1/time') return json(res, 200, { serverTime: Date.now() });
   if (p === '/fapi/v1/exchangeInfo') {
@@ -112,6 +115,27 @@ const server = http.createServer((req, res) => {
     const u2 = unreal();
     return json(res, 200, { totalWalletBalance: String(acct.wallet), totalUnrealizedProfit: String(u2), totalMarginBalance: String(acct.wallet + u2), availableBalance: String(acct.wallet + u2 - margin()),
       positions: Object.values(acct.positions).map((x) => ({ symbol: x.symbol, positionSide: x.side, positionAmt: String(x.side === 'LONG' ? x.qty : -x.qty) })) });
+  }
+  if (p === '/fapi/v3/positionRisk') {
+    return json(res, 200, Object.values(acct.positions).map((x) => {
+      const mk = hist[x.symbol].price * 1.0001, lev = acct.leverage[x.symbol] || 1, d = x.side === 'LONG' ? 1 : -1;
+      return { symbol: x.symbol, positionSide: x.side, positionAmt: String(d * x.qty), entryPrice: String(x.entry), breakEvenPrice: String(x.entry), markPrice: String(mk),
+        unRealizedProfit: String((mk - x.entry) * x.qty * d), liquidationPrice: String(lev <= 1 && d > 0 ? 0 : x.entry * (1 - d / lev * 0.95)), notional: String(d * x.qty * mk),
+        marginAsset: 'USDT', initialMargin: String((x.qty * mk) / lev), positionInitialMargin: String((x.qty * mk) / lev), updateTime: Date.now() };
+    }));
+  }
+  if (p === '/fapi/v1/income') {
+    const st = Number(q.startTime || 0), et = Number(q.endTime || Date.now());
+    return json(res, 200, incomes.filter((r) => r.time >= st && r.time <= et).slice(0, Number(q.limit || 100)));
+  }
+  if (p === '/fapi/v1/listenKey') {
+    if (req.method === 'POST') { listenKey ||= `mockListenKey${Date.now()}`; return json(res, 200, { listenKey }); }
+    if (req.method === 'PUT') return listenKey ? json(res, 200, {}) : json(res, 400, { code: -1125, msg: 'This listenKey does not exist.' });
+    if (req.method === 'DELETE') { listenKey = null; return json(res, 200, {}); }
+  }
+  if (p === '/mock/external') { // dev: simulate a manual position opened in the Binance app
+    const o = fillOrder({ symbol: q.symbol, side: q.side || 'BUY', positionSide: q.positionSide || 'LONG', quantity: q.qty, newClientOrderId: `web_${Date.now()}` });
+    return json(res, 200, o);
   }
   if (p === '/fapi/v1/positionSide/dual') {
     if (req.method === 'POST') { acct.dual = q.dualSidePosition === 'true'; return json(res, 200, { code: 200, msg: 'success' }); }
@@ -155,6 +179,9 @@ const server = http.createServer((req, res) => {
 
 let oid = 1000;
 const algos = {};
+const incomes = [];
+let listenKey = null;
+let tran = 1;
 function fillOrder(q) {
   const s = q.symbol, qty = Number(q.quantity), px = hist[s].price;
   const k = posKey(s, q.positionSide);
@@ -169,7 +196,12 @@ function fillOrder(q) {
     pos.qty -= qty;
     if (pos.qty <= 1e-9) delete acct.positions[k];
   }
-  acct.wallet -= qty * px * 0.0005;
+  const fee = qty * px * 0.0005;
+  acct.wallet -= fee;
+  const now = Date.now();
+  if (!opening) incomes.push({ symbol: s, incomeType: 'REALIZED_PNL', income: String((px - pos.entry) * qty * (pos.side === 'LONG' ? 1 : -1)), asset: 'USDT', time: now, tranId: tran++, tradeId: String(oid) });
+  incomes.push({ symbol: s, incomeType: 'COMMISSION', income: String(-fee), asset: 'USDT', time: now, tranId: tran++, tradeId: String(oid) });
+  setTimeout(() => pushUserData(q, px, qty, fee), 20);
   return { orderId: ++oid, clientOrderId: q.newClientOrderId, symbol: s, status: 'FILLED', avgPrice: String(px), executedQty: String(qty), cumQuote: String(qty * px), side: q.side, positionSide: q.positionSide };
 }
 
@@ -206,12 +238,14 @@ setInterval(() => {
     fm.c = h.price; fm.h = Math.max(fm.h, h.price); fm.l = Math.min(fm.l, h.price); fm.v += rnd() * 5;
     for (const [iv, ms] of Object.entries(INTERVALS)) {
       if (iv === '1d') { broadcast('market', `${s.toLowerCase()}@kline_1d`, klineMsg(s, '1d', fm, false)); continue; }
-      const t = Math.floor(now / ms) * ms;
+      const bms = c.tradfi && QQQ_MS[iv] ? QQQ_MS[iv] : ms;
+      const t = Math.floor(now / bms) * bms;
       const bk = `${s}:${iv}`;
+      if (barStart[bk] && barStart[bk].t !== t) broadcast('market', `${s.toLowerCase()}@kline_${iv}`, klineMsg(s, iv, barStart[bk], true, bms)); // closed (x=true)
       if (!barStart[bk] || barStart[bk].t !== t) barStart[bk] = { t, o: h.price, h: h.price, l: h.price, c: h.price, v: 0 };
       const b = barStart[bk];
       b.c = h.price; b.h = Math.max(b.h, h.price); b.l = Math.min(b.l, h.price); b.v += rnd();
-      broadcast('market', `${s.toLowerCase()}@kline_${iv}`, klineMsg(s, iv, b, false, ms));
+      broadcast('market', `${s.toLowerCase()}@kline_${iv}`, klineMsg(s, iv, b, false, bms));
     }
     const d0 = h.daily[h.daily.length - 1];
     broadcast('market', `${s.toLowerCase()}@ticker`, { e: '24hrTicker', s, p: String(h.price - d0.c), P: String(((h.price / d0.c) - 1) * 100), c: String(h.price), h: String(fm.h), l: String(fm.l), v: String(fm.v), q: String(fm.v * h.price) });
@@ -223,6 +257,15 @@ setInterval(() => {
     broadcast('public', `${s.toLowerCase()}@depth20@500ms`, { e: 'depthUpdate', E: now, s, b: bids, a: asks });
   }
 }, 500);
+
+// ---- user data stream (/private route)
+function pushUserData(q, px, qty, fee) {
+  if (!listenKey) return;
+  const E = Date.now();
+  broadcast('private', listenKey, { e: 'ORDER_TRADE_UPDATE', E, T: E, o: { s: q.symbol, c: q.newClientOrderId, S: q.side, o: 'MARKET', q: String(qty), ap: String(px), X: 'FILLED', x: 'TRADE', l: String(qty), L: String(px), n: String(fee), N: 'USDT', ps: q.positionSide, rp: '0' } });
+  broadcast('private', listenKey, { e: 'ACCOUNT_UPDATE', E, T: E, a: { m: 'ORDER', B: [{ a: 'USDT', wb: String(acct.wallet), cw: String(acct.wallet), bc: '0' }],
+    P: ['LONG', 'SHORT'].map((side) => { const x = acct.positions[posKey(q.symbol, side)]; return { s: q.symbol, pa: String(x ? (side === 'LONG' ? x.qty : -x.qty) : 0), ep: String(x?.entry || 0), up: String(x ? (hist[q.symbol].price - x.entry) * x.qty * (side === 'LONG' ? 1 : -1) : 0), mt: 'cross', iw: '0', ps: side }; }) } });
+}
 
 function klineMsg(s, i, k, x, ms = DAY) {
   return { e: 'kline', s, k: { t: k.t, T: k.t + ms - 1, s, i, o: String(k.o), c: String(k.c), h: String(k.h), l: String(k.l), v: String(k.v), x } };

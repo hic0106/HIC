@@ -1,5 +1,6 @@
 // Shadow (virtual) portfolio. Never sends orders.
-// Replays the EXISTING strategy signals (strategies.evaluate) on closed daily candles and the same
+// Replays the EXISTING strategy signals (strategies.evaluate) on the same closed candles the live engine uses
+// (per-strategy timeframe: Turtle/ADX 4h, TSMOM 1d, QQQ US session) and the same
 // ATR emergency-stop rule, with 1.00x baseline sizing. Each virtual trade also records the controller
 // multiplier proposed at entry, so two books come out of one ledger:
 //   Baseline   = base order × 1.00 (always)
@@ -7,6 +8,7 @@
 // The baseline book is also the controller's performance data source: it is not distorted by
 // controller sizing and keeps accumulating while a strategy is PAUSED.
 import { ALL_STRATEGIES as STRATEGIES, META as STRATEGY_META, evaluateStrategy as evaluate, stopDistancePct, strategiesForSymbol, STRATEGY_CLASS } from '../strategyRegistry.js';
+import { barsFor, timeframeOf } from '../scheduler/timeframes.js';
 
 const dirOf = (side) => (side === 'LONG' ? 1 : -1);
 export const sideKey = (strategy, side) => `${strategy}:${side}`;
@@ -39,16 +41,20 @@ export class ShadowPortfolio {
     for (const sym of this.symbols) this.onDailyClose(sym, now);
   }
 
-  onDailyClose(symbol, now = Date.now()) {
-    for (const st of strategiesForSymbol(symbol)) this.processCandle(st, symbol, now);
+  // interval omitted -> all strategies of the symbol (startup / catch-up)
+  onCandleClose(symbol, interval = null, now = Date.now()) {
+    const cfg = this.getConfig();
+    for (const st of strategiesForSymbol(symbol)) if (!interval || timeframeOf(st, cfg) === interval) this.processCandle(st, symbol, now);
   }
+
+  onDailyClose(symbol, now = Date.now()) { this.onCandleClose(symbol, null, now); }
 
   processCandle(strategy, symbol, now = Date.now()) {
     const cfg = this.getConfig();
     const scfg = cfg.strategies[strategy];
     if (!scfg.enabled) return; // mirrors the engine: disabled strategies do not act
     if (!this.md.s[symbol] || this.md.s[symbol].unavailable) return;
-    const sig = evaluate(strategy, this.md.s[symbol].daily, scfg);
+    const sig = evaluate(strategy, barsFor(this.md, strategy, symbol, cfg), scfg);
     if (!sig.ready) return;
     const slot = this.slot(strategy, symbol);
     if (slot.lastCandle === sig.candleTime) return;

@@ -4,6 +4,8 @@ import { ChartView } from './chart.js';
 import { renderStrategiesTab } from './settings.js';
 import { confirmDialog, openApiModal } from './modals.js';
 import { mountController, unmountController, controllerHeaderHtml, statusTag } from './controller.js';
+import { renderScheduler, setSignals, addSignal, scheduleLine } from './scheduler.js';
+import { mountPortfolio, update as updatePortfolio } from './portfolio.js';
 
 const SHORT = { TURTLE: 'TURTLE', ADX: 'ADX', TSMOM: 'TSMOM', QQQ_EMA_TREND: 'QQQ EMA TREND', QQQ_TSMOM: 'QQQ TSMOM', QQQ_SMA200: 'QQQ SMA200', QQQ_TURTLE_50_20: 'QQQ TURTLE 50/20' };
 const CHIP = { TURTLE: 'TURT', ADX: 'ADX', TSMOM: 'TSMOM', QQQ_EMA_TREND: 'EMA', QQQ_TSMOM: 'TSM', QQQ_SMA200: 'SMA', QQQ_TURTLE_50_20: 'T50' };
@@ -12,7 +14,7 @@ const classOf = (sym) => S.meta.symbolMeta[sym]?.asset_class || 'CRYPTO';
 const isLongOnly = (st) => !S.meta.supportsShort[st];
 const S = {
   snap: null, config: null, meta: null, sel: localGet('sel', 'BTCUSDT'), tab: 'positions',
-  logs: [], logFilter: 'ALL', errCount: 0,
+  logs: [], logFilter: 'ALL', errCount: 0, view: localGet('view', 'terminal'), portfolio: null,
 };
 
 function localGet(k, d) { try { return localStorage.getItem(`hic.${k}`) ?? d; } catch { return d; } }
@@ -27,6 +29,7 @@ async function init() {
   buildIntervalSeg();
   bindUi();
   selectSymbol(S.sel);
+  setView(S.view);
   connectWs();
 }
 
@@ -36,6 +39,9 @@ function connectWs() {
     const m = JSON.parse(ev.data);
     if (m.type === 'snapshot') { S.snap = m.data; render(); }
     else if (m.type === 'kline') chart.onKline(m.data);
+    else if (m.type === 'portfolio') { S.portfolio = m.data; if (S.snap) S.portfolio._filters = Object.fromEntries(Object.entries(S.snap.symbols).map(([k, v]) => [k, v.filters])); if (S.view === 'portfolio') updatePortfolio(S.portfolio); }
+    else if (m.type === 'signals') { setSignals(m.data); if (S.tab === 'scheduler') renderBottom(); }
+    else if (m.type === 'signal') { addSignal(m.data); if (S.tab === 'scheduler') renderBottom(true); }
     else if (m.type === 'log') addLogs([m.data]);
     else if (m.type === 'logs') { S.logs = []; $('#logList').innerHTML = ''; addLogs(m.data); }
   };
@@ -46,7 +52,17 @@ function connectWs() {
 }
 
 // ---------------- UI bindings
+function setView(v) {
+  S.view = v === 'portfolio' ? 'portfolio' : 'terminal';
+  localSet('view', S.view);
+  document.body.classList.toggle('view-portfolio', S.view === 'portfolio');
+  $('#portfolio').classList.toggle('hidden', S.view !== 'portfolio');
+  $$('#viewSwitch button').forEach((b) => b.classList.toggle('on', b.dataset.view === S.view));
+  if (S.view === 'portfolio') { mountPortfolio($('#portfolio'), S.meta); if (S.portfolio) updatePortfolio(S.portfolio); } else chart.resize();
+}
+
 function bindUi() {
+  $('#viewSwitch').addEventListener('click', (e) => { const b = e.target.closest('button[data-view]'); if (b) setView(b.dataset.view); });
   $('#tabs').addEventListener('click', (e) => {
     const b = e.target.closest('button[data-tab]');
     if (!b) return;
@@ -56,7 +72,7 @@ function bindUi() {
     if (S.tab === 'strategies') openStrategies();
     if (S.tab === 'controller') mountController($('#tab-controller')); else unmountController();
     if (S.tab === 'log') { S.errCount = 0; updateErrBadge(); scrollLog(); }
-    renderBottom();
+    renderBottom(true);
   });
   $('#btnMax').onclick = () => { document.body.classList.toggle('bottom-max'); chart.resize(); };
   $('#logBar').addEventListener('click', (e) => {
@@ -215,6 +231,17 @@ function renderTop(s) {
   $('#sExchange').title = s.conn.liveError || '';
   setDot($('#sBot'), s.runState === 'RUNNING' ? 'ok' : 'bad', s.runState);
   const age = s.lastDataUpdate ? (Date.now() - s.lastDataUpdate) / 1000 : null;
+  const rc = s.reconciliation;
+  if (rc) {
+    if (rc.na === 'PAPER') setDot($('#sRecon'), 'off', 'PAPER');
+    else if (rc.na) setDot($('#sRecon'), 'warn', 'WAIT');
+    else setDot($('#sRecon'), rc.ok ? 'ok' : 'bad', rc.ok ? 'OK' : 'MISMATCH');
+    $('#sRecon').title = (rc.warnings || []).join('\n');
+  }
+  if (s.risk) {
+    setDot($('#sRisk'), s.risk.liquidation?.length ? 'bad' : s.risk.stopsActive ? 'ok' : 'warn', `${s.risk.stopsActive ? 'LIVE' : 'OFF'} ${s.risk.watched}`);
+    $('#sRisk').title = `RiskMonitor: ${s.risk.watched} stops watched on every price tick${s.risk.nearStop?.length ? ` · ${s.risk.nearStop.length} within 1% of stop` : ''}${s.risk.liquidation?.length ? ' · LIQUIDATION RISK' : ''}`;
+  }
   $('#sLast').innerHTML = s.lastDataUpdate ? `<span class="${age > 10 ? 'down' : ''}">${fTime(s.lastDataUpdate)}</span>` : '—';
   $('#btnStart').disabled = s.runState === 'RUNNING';
   $('#btnStop').disabled = s.runState !== 'RUNNING';
@@ -330,9 +357,12 @@ function stratCard(s, st, sym, f) {
     add('Long Order', `${fNum(amt.long, 0)} USDT`);
     add('Short Order', isLongOnly(st) ? 'CASH' : cfg.shortEnabled ? `${fNum(amt.short, 0)} USDT` : 'OFF');
   }
+  const tf = (s.scheduler || []).find((r) => r.strategy === st && r.symbol === sym);
+  const U = tf?.timeframeLabel === '4H' ? '×4H' : 'D';
   if (st === 'TURTLE') {
-    add('20D High', fPrice(v.entryHigh, f)); add('20D Low', fPrice(v.entryLow, f));
-    add('10D Low', fPrice(v.exitLow, f)); add('10D High', fPrice(v.exitHigh, f));
+    const pp = cfg.params;
+    add(`${pp.entryPeriod}${U} High`, fPrice(v.entryHigh, f)); add(`${pp.entryPeriod}${U} Low`, fPrice(v.entryLow, f));
+    add(`${pp.exitPeriod}${U} Low`, fPrice(v.exitLow, f)); add(`${pp.exitPeriod}${U} High`, fPrice(v.exitHigh, f));
     add('SMA200', fPrice(v.sma, f), v.sma && s.symbols[sym].price < v.sma ? 'down' : 'up');
   } else if (st === 'ADX') {
     add('ADX', fNum(v.adx, 1), v.adx > cfg.params.threshold ? 'warn' : '');
@@ -357,7 +387,8 @@ function stratCard(s, st, sym, f) {
   if (sl.pending) notes.push(`<span class="warn">Pending ${sl.pending.action} ${sl.pending.side} ${sl.pending.clientOrderId}</span>`);
   if (sl.block?.LONG || sl.block?.SHORT) notes.push('<span class="warn">Re-arm: waiting condition reset after stop</span>');
   if (v.notReady) notes.push(`<span class="warn">${esc(v.notReady)}</span>`);
-  if (sl.evalCandle) notes.push(`Last eval: ${fDateTime(sl.evalCandle).slice(0, 10)} ${S.meta.strategyClass[st] === 'CRYPTO' ? 'D' : 'US session'} · ${esc(sl.lastSignal || '')}`);
+  if (tf) notes.push(scheduleLine(tf));
+  if (sl.evalCandle) notes.push(`Signal: ${esc(sl.lastSignal || '')}`);
   if (!cfg.enabled) notes.push('<span class="muted">disabled (optional / research)</span>');
   return `<div class="strat-card"><div class="sc-h"><b>${SHORT[st]}</b><span class="tag ${tagCls}">${p ? p.side : label}</span></div>
     <div class="sc-grid">${rows.join('')}</div><div class="sc-note">${notes.join('<br>')}</div></div>`;
@@ -416,7 +447,7 @@ function renderSummary(s) {
 }
 
 // ---------------- bottom tabs
-function renderBottom() {
+function renderBottom(force = false) {
   const s = S.snap;
   if (!s) return;
   $('#cntPos').textContent = s.positions.length;
@@ -427,10 +458,20 @@ function renderBottom() {
   cc.textContent = s.controller?.pending || 0;
   cc.classList.toggle('err', !!s.controller?.pending || !!s.controller?.failSafe);
   cc.classList.toggle('has', !!s.controller?.pending || !!s.controller?.failSafe);
-  $('#tabHint').textContent = S.tab === 'strategies' ? `Editing applies only on Save · current mode ${s.mode}` : S.tab === 'controller' ? 'Controller sizes NEW entries only · signals / stops / leverage untouched' : '';
+  $('#tabHint').textContent = S.tab === 'strategies' ? `Editing applies only on Save · current mode ${s.mode}` : S.tab === 'scheduler' ? 'Signals only on closed candles · entries older than the grace window are skipped · exits always run' : S.tab === 'controller' ? 'Controller sizes NEW entries only · signals / stops / leverage untouched' : '';
   if (S.tab === 'positions') renderPositions(s);
   else if (S.tab === 'orders') renderOrders(s, openOrders);
   else if (S.tab === 'trades') renderTrades(s);
+  else if (S.tab === 'scheduler') {
+    const pane = $('#tab-scheduler');
+    // do not re-render while a filter dropdown is in use; refresh at most every 2 s unless a new signal arrived
+    if (pane.contains(document.activeElement) && document.activeElement.tagName === 'SELECT') return;
+    if (!force && Date.now() - (S._schedAt || 0) < 2000) return;
+    S._schedAt = Date.now();
+    const top = pane.scrollTop;
+    renderScheduler(pane, s);
+    pane.scrollTop = top;
+  }
 }
 
 function renderPositions(s) {

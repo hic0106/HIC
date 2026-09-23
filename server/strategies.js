@@ -7,7 +7,7 @@ import { sma, atr, adx, priorHigh, priorLow, logMomentum } from './indicators.js
 export const STRATEGIES = ['TURTLE', 'ADX', 'TSMOM'];
 
 export const STRATEGY_META = {
-  TURTLE: { label: 'Turtle 20/10', short: 'T', supportsShort: true, exitRule: (p) => `${p.exitPeriod}D Channel`,
+  TURTLE: { label: 'Turtle 20/10', short: 'T', supportsShort: true, exitRule: (p) => `${p.exitPeriod}-bar Channel`,
     // Breakout is an event: re-entry after a stop only needs a new breakout close.
     resetAfterStop: false },
   ADX: { label: 'ADX Trend', short: 'A', supportsShort: true, exitRule: (p) => `ADX<=${p.threshold} / DI Cross`,

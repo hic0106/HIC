@@ -5,11 +5,14 @@ import { BinanceClient, endpoints, parseSymbolFilters } from './binance.js';
 import { SYMBOL_META, isSessionSymbol, assetClassOf } from './assets.js';
 import { BinanceUsSessionProvider } from './dataProviders.js';
 import { DEFAULT_US_CALENDAR, marketStatus } from './session.js';
+import { US_SESSION } from './scheduler/timeframes.js';
 
 export const CHART_INTERVALS = ['5m', '15m', '1h', '4h', '1d'];
 export const SESSION_INTERVAL = 'US1D'; // chart of US regular-session candles (QQQ signal data)
 const DAILY = '1d';
 const DAILY_HISTORY = 500;
+// Intraday closed-candle series kept for strategies (Turtle / ADX on 4h). 1000 x 4h ≈ 166 days (SMA200 warm-up).
+const STRATEGY_BARS = { '4h': 1000 };
 
 const toCandle = (a) => ({ t: a[0], o: +a[1], h: +a[2], l: +a[3], c: +a[4], v: +a[5], T: a[6] });
 const wsCandle = (k) => ({ t: k.t, o: +k.o, h: +k.h, l: +k.l, c: +k.c, v: +k.v, T: k.T });
@@ -27,8 +30,10 @@ export class MarketData extends EventEmitter {
     this.s = {};
     for (const sym of symbols) {
       this.s[sym] = {
-        daily: [], // closed daily candles
+        daily: [], // closed daily candles (QQQ: closed US regular-session candles)
         forming: null, // current (open) daily candle
+        bars: Object.fromEntries(Object.keys(STRATEGY_BARS).map((i) => [i, []])), // closed intraday candles for strategies
+        formingBar: {}, // interval -> open candle
         last: null, lastTs: 0,
         ticker: null, mark: null, depth: null,
         assetClass: assetClassOf(sym), unavailable: null,
@@ -45,7 +50,7 @@ export class MarketData extends EventEmitter {
   async start() {
     await this.loadExchangeInfo();
     for (const sym of this.symbols) {
-      if (!this.s[sym].session) { await this.loadDaily(sym); continue; }
+      if (!this.s[sym].session) { await this.loadDaily(sym); await this.loadBars(sym); continue; }
       // TradFi symbols are isolated: a failure never blocks crypto trading
       if (!this.filters[sym]) { this.markUnavailable(sym, 'symbol not found in Binance exchangeInfo'); continue; }
       try { await this.loadSession(sym); } catch (e) { this.markUnavailable(sym, `session history load failed: ${e.message}`); }
@@ -126,6 +131,17 @@ export class MarketData extends EventEmitter {
     return st.daily;
   }
 
+  async loadBars(sym) {
+    const st = this.s[sym];
+    for (const [iv, n] of Object.entries(STRATEGY_BARS)) {
+      const rows = (await this.rest.klines(sym, iv, Math.min(1500, n + 1))).map(toCandle);
+      const now = Date.now();
+      st.bars[iv] = rows.filter((c) => c.T < now);
+      st.formingBar[iv] = rows.find((c) => c.T >= now) || null;
+      this.log.info(`${sym} ${iv} candles loaded (${st.bars[iv].length} closed)`);
+    }
+  }
+
   connect(route, streams) {
     const url = `${this.wsBase}/${route}/stream?streams=${streams.join('/')}`;
     let retry = 0;
@@ -171,6 +187,10 @@ export class MarketData extends EventEmitter {
       this.emit('kline', { symbol: d.s, interval, candle: c, closed: d.k.x });
       this.updateChartCache(d.s, interval, c);
       if (st.session && interval === st.session.interval) { st.session.onBar(c); return; }
+      if (!st.session && STRATEGY_BARS[interval]) {
+        if (d.k.x) { this.appendBar(d.s, interval, c); st.formingBar[interval] = null; } else st.formingBar[interval] = c;
+        return;
+      }
       if (st.session && interval === DAILY) {
         // 24/7 Binance daily candle: price only — QQQ signals use US-session candles
         st.last = c.c;
@@ -194,6 +214,7 @@ export class MarketData extends EventEmitter {
     } else if (d.e === 'markPriceUpdate') {
       const prev = st.mark;
       st.mark = { price: +d.p, index: +d.i, fundingRate: +d.r, nextFundingTime: d.T };
+      this.emit('mark', { symbol: d.s, price: st.mark.price });
       if (prev && prev.nextFundingTime && d.T > prev.nextFundingTime) {
         // funding settled at prev.nextFundingTime with prev.fundingRate
         this.emit('funding', { symbol: d.s, time: prev.nextFundingTime, rate: prev.fundingRate, markPrice: prev.price });
@@ -210,7 +231,27 @@ export class MarketData extends EventEmitter {
     st.daily.push(c);
     if (st.daily.length > DAILY_HISTORY + 50) st.daily.splice(0, st.daily.length - DAILY_HISTORY);
     this.log.info(`${sym.replace('USDT', '')} ${note || 'daily candle closed'} C=${c.c}`);
-    this.emit('dailyClose', { symbol: sym, candle: c });
+    this.emit('candleClose', { symbol: sym, interval: st.session ? US_SESSION : DAILY, candle: c });
+  }
+
+  appendBar(sym, interval, c) {
+    const arr = this.s[sym].bars[interval];
+    const lastT = arr.length ? arr[arr.length - 1].t : 0;
+    if (c.t <= lastT) return false; // duplicate close event
+    arr.push(c);
+    if (arr.length > STRATEGY_BARS[interval] + 100) arr.splice(0, arr.length - STRATEGY_BARS[interval]);
+    this.emit('candleClose', { symbol: sym, interval, candle: c });
+    return true;
+  }
+
+  async resyncBars(sym, interval, reason) {
+    try {
+      const rows = (await this.rest.klines(sym, interval, 5)).map(toCandle);
+      const now = Date.now();
+      for (const c of rows) if (c.T < now && this.appendBar(sym, interval, c)) this.log.warn(`${sym} missed ${interval} close recovered via REST (${reason})`, 'DATA_RESYNC');
+    } catch (e) {
+      this.log.error(`${sym} ${interval} resync failed: ${e.message}`, 'API_ERROR');
+    }
   }
 
   // If a daily close was missed (ws gap), refetch via REST and emit closes for new candles.
@@ -218,6 +259,7 @@ export class MarketData extends EventEmitter {
     for (const sym of this.symbols) {
       const st = this.s[sym];
       if (st.session) { this.checkSessionClose(sym, reason); continue; }
+      for (const iv of Object.keys(STRATEGY_BARS)) this.resyncBars(sym, iv, reason);
       const lastT = st.daily.length ? st.daily[st.daily.length - 1].t : 0;
       try {
         const rows = (await this.rest.klines(sym, DAILY, 5)).map(toCandle);
@@ -242,6 +284,10 @@ export class MarketData extends EventEmitter {
     for (const sym of this.symbols) {
       const st = this.s[sym];
       if (st.session) continue;
+      for (const iv of Object.keys(STRATEGY_BARS)) {
+        const fb = st.formingBar[iv];
+        if (fb && now > fb.T + 10_000) { st.formingBar[iv] = null; this.resyncBars(sym, iv, 'close event missing'); }
+      }
       // forming candle end passed but no close event within 10s -> resync
       if (st.forming && now > st.forming.T + 10_000) {
         st.forming = null;

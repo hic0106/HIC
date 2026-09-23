@@ -13,6 +13,7 @@ import { decide, multiplierTable, MAX_MULTIPLIER, STATUS_ORDER } from './decisio
 import { ControllerStore } from './controllerStore.js';
 import { ShadowPortfolio, emptyShadowState, sideKey } from './shadowPortfolio.js';
 import { ParameterCandidateManager } from './parameterCandidateManager.js';
+import { timeframeOf } from '../scheduler/timeframes.js';
 
 export const CONTROLLER_MODES = ['OFF', 'OBSERVE', 'PAPER_AUTO', 'LIVE_APPROVAL'];
 const SIDES = ['LONG', 'SHORT'];
@@ -54,7 +55,8 @@ export class Controller {
   // ---------- lifecycle (all handlers isolated: a controller error never stops trading)
   start() {
     const safe = (fn) => (...a) => { try { fn(...a); } catch (e) { this.enterFailSafe(e); } };
-    this.md.on('dailyClose', safe(({ symbol }) => { this.shadow.onDailyClose(symbol); this.cstore.save(); }));
+    this.md.on('candleClose', safe(({ symbol, interval }) => { this.shadow.onCandleClose(symbol, interval); this.cstore.save(); }));
+    safe(() => this.recordTimeframeChanges())();
     this.md.on('price', safe(({ symbol, price }) => this.shadow.onPrice(symbol, price)));
     this.md.on('funding', safe((f) => this.shadow.onFunding(f)));
     this.timer = setInterval(safe(() => this.tick()), 60_000);
@@ -115,6 +117,20 @@ export class Controller {
     this.cstore.save();
   }
 
+  // Signal timeframe changes (e.g. Turtle/ADX 1d -> 4h after upgrade) are recorded as parameter changes,
+  // so performance before/after is evaluated separately.
+  recordTimeframeChanges() {
+    const cur = Object.fromEntries(STRATEGIES.map((st) => [st, timeframeOf(st, this.store.config)]));
+    const prev = this.state.timeframes;
+    this.state.timeframes = cur;
+    if (!prev) { // first run with timeframe tracking: before this version every strategy used daily / session candles
+      for (const st of STRATEGIES) if (STRATEGY_CLASS[st] === 'CRYPTO' && cur[st] !== '1d') this.onStrategyConfigChanged(st, { timeframe: '1d' }, { timeframe: cur[st] });
+    } else {
+      for (const st of STRATEGIES) if (prev[st] && prev[st] !== cur[st]) this.onStrategyConfigChanged(st, { timeframe: prev[st] }, { timeframe: cur[st] });
+    }
+    this.cstore.save();
+  }
+
   // ---------- evaluation
   lastParamChange(strategy) {
     return [...(this.state.changes || [])].reverse().find((c) => c.strategy === strategy && c.significant) || null;
@@ -143,10 +159,11 @@ export class Controller {
     try {
       const fields = diffObj(prev, next);
       if (!fields.length) return;
-      const significant = fields.some((f) => /^(params|stop|takeProfit|shortEnabled)/.test(f.path));
+      const significant = fields.some((f) => /^(params|stop|takeProfit|shortEnabled|timeframe)/.test(f.path));
       const now = Date.now();
       const ch = { id: `${strategy}:${now}`, at: now, day: utcDay(now), strategy, significant, fields };
       (this.state.changes ||= []).push(ch);
+      if (next?.timeframe && this.state.timeframes) this.state.timeframes[strategy] = timeframeOf(strategy, { strategies: { [strategy]: next } });
       if (this.state.changes.length > 500) this.state.changes.shift();
       this.cstore.appendHistory({
         type: 'CONFIG_CHANGE', timestamp: new Date(now).toISOString(), controller_mode: this.cfg.mode, strategy, side: 'ALL',

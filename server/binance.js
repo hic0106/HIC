@@ -83,6 +83,12 @@ export class BinanceClient {
     return this._fetch(method, `${this.restBase}${path}?${qs}&signature=${sig}`, { 'X-MBX-APIKEY': this.apiKey });
   }
 
+  // USER_STREAM endpoints: API key header only, no signature.
+  async keyed(method, path) {
+    if (!this.apiKey) throw new BinanceError('API key not configured', { definitive: true, code: 'NO_KEYS' });
+    return this._fetch(method, `${this.restBase}${path}`, { 'X-MBX-APIKEY': this.apiKey });
+  }
+
   // ---- public
   exchangeInfo() { return this.publicGet('/fapi/v1/exchangeInfo'); }
   klines(symbol, interval, limit = 500) { return this.publicGet('/fapi/v1/klines', { symbol, interval, limit }); }
@@ -97,6 +103,13 @@ export class BinanceClient {
   newOrder(params) { return this.signed('POST', '/fapi/v1/order', params); }
   queryOrder(symbol, origClientOrderId) { return this.signed('GET', '/fapi/v1/order', { symbol, origClientOrderId }); }
   userTrades(symbol, orderId) { return this.signed('GET', '/fapi/v1/userTrades', { symbol, orderId }); }
+  // Income history (REALIZED_PNL / COMMISSION / FUNDING_FEE / TRANSFER ...). Only the last 3 months are kept by Binance.
+  income(params = {}) { return this.signed('GET', '/fapi/v1/income', { limit: 1000, ...params }); }
+
+  // User Data Stream: listenKey valid 60 min, extended by keepalive (PUT).
+  startUserStream() { return this.keyed('POST', '/fapi/v1/listenKey'); }
+  keepaliveUserStream() { return this.keyed('PUT', '/fapi/v1/listenKey'); }
+  closeUserStream() { return this.keyed('DELETE', '/fapi/v1/listenKey'); }
 
   // Conditional orders (STOP_MARKET etc.) live in the Algo service since 2025-12-09.
   // A triggered algo order becomes a regular order whose clientOrderId = clientAlgoId.

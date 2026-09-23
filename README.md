@@ -3,7 +3,7 @@
 Binance USDT-M Perpetual Futures 기반 멀티자산·멀티전략 자동매매 트레이딩 터미널.
 
 ```
-CRYPTO  BTCUSDT / ETHUSDT / XRPUSDT  → Turtle 20/10 · ADX 14/25 · TSMOM 30d   (UTC 일봉)
+CRYPTO  BTCUSDT / ETHUSDT / XRPUSDT  → Turtle 20/10 (4H) · ADX 14/25 (4H) · TSMOM 30d (1D)
 TRADFI  QQQUSDT (Invesco QQQ 지수 perpetual) → EMA 50/150 · TSMOM 126 · SMA200(옵션) · Turtle 50/20(옵션)   (미국 정규장 세션)
 SELF-IMPROVING CONTROLLER → 두 자산군의 주문 배수만 조절
 EXECUTION → Binance Futures
@@ -11,11 +11,11 @@ EXECUTION → Binance Futures
 
 | 전략 | 방향 | 진입 | 청산 | Emergency Stop (기본) |
 |---|---|---|---|---|
-| TURTLE 20/10 | Long + Short | 종가 > 이전 20일 고가 / 종가 < 이전 20일 저가 **AND** 종가 < SMA200 | Long: 종가 < 이전 10일 저가, Short: 종가 > 이전 10일 고가 | ATR(20)×2.0, 8~18% |
-| ADX Trend | Long + Short | ADX>25 & +DI>-DI / ADX>25 & -DI>+DI & 종가<SMA200 | Long: ADX<=25 or -DI>=+DI, Short: ADX<=25 or +DI>=-DI | ATR(14)×2.0, 6~15% |
-| TSMOM 30D | Long + Cash | 30일 누적 로그수익률 > 0 | 30일 모멘텀 <= 0 | ATR(20)×3.0, 10~22% |
+| TURTLE 20/10 (4H) | Long + Short | 종가 > 이전 20봉 고가 / 종가 < 이전 20봉 저가 **AND** 종가 < SMA200 | Long: 종가 < 이전 10봉 저가, Short: 종가 > 이전 10봉 고가 | ATR(20)×2.0, 8~18% |
+| ADX Trend (4H) | Long + Short | ADX>25 & +DI>-DI / ADX>25 & -DI>+DI & 종가<SMA200 | Long: ADX<=25 or -DI>=+DI, Short: ADX<=25 or +DI>=-DI | ATR(14)×2.0, 6~15% |
+| TSMOM 30D (1D) | Long + Cash | 30일 누적 로그수익률 > 0 | 30일 모멘텀 <= 0 | ATR(20)×3.0, 10~22% |
 
-- 채널 계산에서 현재 봉은 제외합니다. 모든 신호는 **마감된 일봉(1D, UTC 00:00 = KST 09:00)** 기준으로 평가합니다.
+- 채널 계산에서 현재 봉은 제외합니다. 신호는 전략별 Timeframe의 **마감된 캔들**로만 평가합니다: Turtle·ADX = 4H (KST 01·05·09·13·17·21시 마감), TSMOM = 1D (UTC 00:00 = KST 09:00), QQQ = 미국 정규장 마감(America/New_York). 아래 [StrategyScheduler](#strategyscheduler) 참고.
 - Emergency Stop은 실시간 가격으로 감시하며, 전략 Exit와 Stop 중 먼저 발생한 조건으로 청산합니다.
 - 고정 Take Profit은 기본 OFF (전략별로 켤 수 있음).
 
@@ -55,7 +55,8 @@ Testnet을 체크하면 주문이 `demo-fapi.binance.com`으로 전송됩니다(
 - **왼쪽**: Watchlist(가격, 24h 등락, 전략별 상태) + 코인별 Exposure.
 - **중앙**: 캔들차트(거래량, 크로스헤어, 줌/팬, 현재가), 전략 포지션 Entry/Stop 라인과 PnL, 거래 마커, SMA200, 20D/10D 채널 — 전략별 On/Off. 아래 전략·계좌 요약.
 - **오른쪽**: 선택 종목 시장정보, 전략 상태 패널, Order Book.
-- **하단 탭**: Positions / Orders / Trades / Strategies(운영 설정) / System Log.
+- **하단 탭**: Positions / Orders / Trades / Strategies(운영 설정) / Scheduler(전략별 평가 일정 + Signal Log) / Controller / System Log.
+- **PORTFOLIO 화면** (상단 `PORTFOLIO` 버튼): 실제 계좌와 전략별 자산 상태. 아래 [Portfolio](#portfolio) 참고.
 
 ## 운영 규칙
 
@@ -150,17 +151,50 @@ Market Data → Turtle / ADX / TSMOM (기존 신호) → Controller (배수) →
 - 자산군 분리: Crypto와 TradFi(QQQ)는 Regime(BTC / QQQ 세션)과 성과를 따로 평가하며 서로 순위를 비교하지 않습니다. QQQ 전략도 BOOSTED~PAUSED 상태를 가지지만 EMA 50/150, TSMOM 126은 고정입니다.
 - **설정 변경 기록**: Strategies에서 저장할 때마다 변경 내용을 History(`CONFIG_CHANGE`)와 Shadow 차트 마커로 남깁니다. 진입/청산/Stop 파라미터가 바뀌면 기본적으로 변경 이후 데이터만으로 평가하고(`resetHistoryOnParamChange`), 표에 변경 후 수익률과 변경 전 같은 기간 수익률을 나란히 표시합니다. 주문금액만 바꾼 경우는 평가 데이터를 유지합니다.
 
+## StrategyScheduler
+
+전략 인스턴스(전략 × 종목 × Timeframe)별로 **캔들 마감 이벤트**(Binance kline `x=true`, QQQ는 미국 정규장 세션 마감)에 한 번씩 평가합니다. 시계(09:00 등)는 UI 표시와 누락 대비 fallback에만 씁니다.
+
+| 전략 | Timeframe | 평가 시점 |
+|---|---|---|
+| TURTLE / ADX | 4H | Binance 4H 캔들 마감 (UTC 00·04·08·12·16·20시) |
+| TSMOM | 1D | Binance 일봉 마감 (UTC 00:00) |
+| QQQ 전략 | US_SESSION | NYSE 정규장 마감 16:00 ET (조기폐장 13:00, 휴장일 제외, DST 자동) — 장외 시간 QQQUSDT 가격 변화로는 재계산하지 않음. 실행은 Binance 24/7 |
+
+- Crypto 전략 Timeframe은 Strategies 탭 `Signal Timeframe`(4H / 1D)에서 바꿀 수 있습니다. 전략 규칙 자체는 동일합니다.
+- **중복 방지**: `(strategy, symbol, timeframe, candle close time)` 키를 `data/state.json`(모드별 `scheduler`)에 저장. 같은 캔들은 재시작 후에도 다시 평가·주문하지 않습니다.
+- **재시작 / 늦은 START**: 마지막 평가 캔들과 최신 마감 캔들을 비교해 **최신 캔들 1개만** 평가합니다(지표는 전체 히스토리로 재계산). 청산 신호는 늦어도 실행하고, 신규 진입은 캔들 마감 후 `entryGraceMin`(4H 30분, 1D·US_SESSION 120분, `config.json › general.scheduler`) 이내일 때만 실행합니다. 초과 시 `STALE_SIGNAL_SKIPPED` 로그 후 다음 캔들을 기다립니다.
+- 일시적 실패(데이터 지연, 주문 결과 UNKNOWN 등)는 같은 캔들 안에서 15초마다 재시도하며, 결과 UNKNOWN 주문은 재전송하지 않고 clientOrderId로 조회합니다.
+- **Signal Log** (Scheduler 탭, `data/signals/signals-YYYY-MM-DD.jsonl`): 신호가 없어도 모든 평가를 기록합니다. 예: `TURTLE BTCUSDT 4H Candle Closed C=… 20H Breakout=False 20L Breakdown=False 10L Exit=False 10H Exit=False Result=HOLD`.
+
+### RiskMonitor (실시간)
+
+Emergency Stop / Take Profit은 스케줄러와 분리되어 **모든 가격 틱**에서 검사합니다(캔들 마감을 기다리지 않음). Stop 가격은 진입 시 확정된(마감) 캔들의 ATR로 정해지고 이후 바뀌지 않습니다. 그 외 청산가 근접(LIVE, 10% 이내 경고), 거래소 포지션 불일치, 데이터/API 연결 상태, CLOSE ALL(수동 비상청산)을 담당합니다.
+
+## Portfolio
+
+- **상단 요약**: Total Equity · Today's PnL · Total Return(강조), Available, Total Invested(진입가 기준), Position Value(마크가 기준), Unrealized, Realized Today(LIVE는 Binance income 기준), Total PnL, 현재/최대 Drawdown.
+- **Exchange View**: Binance 실제 Wallet / Available / Margin Balance / Unrealized / 포지션(진입가·마크·청산가·증거금) — 진실 원천. `/fapi/v3/account` + `/fapi/v3/positionRisk` REST 스냅샷(15초)과 **User Data Stream**(listenKey, `/private` 경로: ACCOUNT_UPDATE / ORDER_TRADE_UPDATE) 이벤트로 갱신. 스트림이 끊기면 REST 스냅샷으로 복구합니다.
+- **Strategy View**: 봇 원장 기준 전략별 투자금·평가액·Long/Short·미실현·오늘 실현·누적 실현(QQQ 전략 포함).
+- **Reconciliation**: 거래소 수량과 전략 원장 합계를 종목/방향별로 비교. 차이가 5초 이상 유지되면 `RECONCILIATION WARNING` (예: `BTC LONG Exchange Qty 0.01 Internal 0.008 Diff +0.002`). 자동 수정·숨김 없음. 차이 수량은 `UNATTRIBUTED` 행으로 표시됩니다.
+- Asset Allocation(BTC/ETH/XRP/QQQ/CASH, CRYPTO/TRADFI/CASH), Gross Long / Gross Short / Net, 코인별 전략 Net Exposure, All Positions(필터·정렬), PnL Breakdown(Today/7D/30D/All × Symbol/Strategy/Asset Class), Gross/Fees/Funding/Net.
+- Equity Curve(1D/7D/1M/3M/ALL, 전략 PnL overlay 옵션): `data/portfolio-history.json`에 5분 간격(35일) + 일별(무기한) 저장. Drawdown은 입출금(TRANSFER)을 제외한 값입니다.
+- 체결·청산·비상청산 시 즉시 갱신(Signal → Order → Fill → Position → Portfolio).
+- PAPER 모드는 가상 계좌가 Exchange View 역할을 합니다.
+
 ## 알아둘 제한사항
 
 - PC가 꺼져 있으면 Binance Stop 외의 기능(신규 진입, 전략 Exit, Take Profit)은 동작하지 않습니다. 24시간 운용은 클라우드 서버에서 실행하세요.
 - Take Profit은 Binance에 등록하지 않고 봇이 감시합니다.
 - 계정에 수동으로 연 포지션이 같은 코인/방향에 있으면 Hedge Mode 포지션이 합쳐지므로 봇 전용 계정(서브계정) 사용을 권장합니다.
-- LIVE Funding Fee는 마크가격 스트림 기준 계산값입니다(실제 차감액과 소수점 차이 가능).
+- 전략 원장의 LIVE Funding Fee는 마크가격 스트림 기준 계산값입니다(실제 차감액은 Portfolio › Binance income에 표시).
+- 업그레이드 시 Turtle·ADX는 1D → 4H로 바뀝니다. 기존 보유 포지션의 Stop 가격은 그대로이며, 청산 신호는 4H 채널/ADX로 평가됩니다. Controller는 이 변경을 파라미터 변경으로 기록해 이전/이후 성과를 분리 평가합니다.
+- Binance income 기록은 최근 3개월만 조회됩니다.
 
 ## 개발 / 테스트
 
 ```bash
-npm test            # 지표·전략·엔진(중복주문/Skip/Stop) 단위 테스트
+npm test            # 지표·전략·엔진·스케줄러·Portfolio 회귀 테스트
 npm run mock        # 로컬 가짜 Binance 서버 (MOCK_DAY_MS=20000 으로 하루를 20초로 가속)
 npm run dev:mock    # 가짜 서버에 연결해 터미널 실행 (data-mock/ 사용)
 ```
@@ -180,6 +214,9 @@ server/session.js     미국 정규장 세션(America/New_York, 휴장일, 조�
 server/dataProviders.js  QQQ 세션 신호 데이터 provider
 server/strategiesTradfi.js  QQQ 전략(EMA / TSMOM / SMA200 / Turtle 50-20)
 server/strategyRegistry.js  자산군별 전략 매핑
+server/scheduler/     StrategyScheduler(캔들 마감 평가·중복 방지·catch-up), Timeframe, Signal Log
+server/risk/          RiskMonitor(실시간 Stop·청산가·연결 감시)
+server/portfolio/     PortfolioService(Exchange/Strategy View), User Data Stream, Reconciliation, Equity History
 server/controller/    Self-Improving Controller (engine, 성과 평가, Regime, 결정 규칙, 저장, Shadow Portfolio)
 public/               터미널 UI (lightweight-charts)
 tools/mock-binance.js 개발용 가짜 거래소

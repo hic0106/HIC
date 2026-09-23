@@ -9,6 +9,7 @@
 <body>
 <header id="topbar">
   <div class="brand"><b>HIC</b><span>FUTURES TERMINAL</span></div>
+  <div class="view-switch" id="viewSwitch"><button data-view="terminal" class="on">TERMINAL</button><button data-view="portfolio">PORTFOLIO</button></div>
 
   <div class="mode-block">
     <div id="modeBadge" class="mode-badge paper">PAPER</div>
@@ -38,6 +39,8 @@
     <div><label>API</label><span id="sExchange" class="dot">—</span></div>
     <div><label>Bot</label><span id="sBot" class="dot">—</span></div>
     <div><label>Updated</label><span id="sLast">—</span></div>
+    <div><label>Recon</label><span id="sRecon" class="dot off">—</span></div>
+    <div><label>Stops</label><span id="sRisk" class="dot off">—</span></div>
   </div>
 
   <div class="actions">
@@ -70,7 +73,7 @@
         <button data-t="stops" class="on">STOPS</button>
         <button data-t="markers" class="on">TRADES</button>
         <button data-t="sma" class="on">SMA200</button>
-        <button data-t="channel">20D CH</button>
+        <button data-t="channel">CHANNEL</button>
       </div>
       <span id="ctLegend" class="legend"></span>
     </div>
@@ -103,6 +106,7 @@
     <button data-tab="orders">Orders <b id="cntOrd">0</b></button>
     <button data-tab="trades">Trades <b id="cntTrd">0</b></button>
     <button data-tab="strategies">Strategies</button>
+    <button data-tab="scheduler">Scheduler</button>
     <button data-tab="controller">Controller <b id="cntCtl">0</b></button>
     <button data-tab="log">System Log <b id="cntErr" class="err">0</b></button>
     <div class="tabs-right">
@@ -115,6 +119,7 @@
     <div class="tab-pane" id="tab-orders"></div>
     <div class="tab-pane" id="tab-trades"></div>
     <div class="tab-pane" id="tab-strategies"></div>
+    <div class="tab-pane" id="tab-scheduler"></div>
     <div class="tab-pane" id="tab-controller"></div>
     <div class="tab-pane" id="tab-log">
       <div class="log-bar" id="logBar">
@@ -125,6 +130,8 @@
     </div>
   </div>
 </section>
+
+<section id="portfolio" class="hidden"></section>
 
 <div id="modal" class="modal hidden"><div class="modal-box" id="modalBox"></div></div>
 <div id="toasts"></div>

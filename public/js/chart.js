@@ -123,7 +123,7 @@ export class ChartView {
     const smaV = tv.sma ?? av.sma;
     if (this.toggles.sma && this.interval !== '1d' && smaV) put('SMA', { price: smaV, color: '#8e7cc3', lineStyle: LC.LineStyle.Dotted, title: 'D SMA200' });
     if (this.toggles.channel && tv.entryHigh) {
-      put('CH20H', { price: tv.entryHigh, color: '#5b6472', lineStyle: LC.LineStyle.Dotted, title: '20D H' });
+      put('CH20H', { price: tv.entryHigh, color: '#5b6472', lineStyle: LC.LineStyle.Dotted, title: 'CH H' });
       put('CH20L', { price: tv.entryLow, color: '#5b6472', lineStyle: LC.LineStyle.Dotted, title: '20D L' });
       put('CH10H', { price: tv.exitHigh, color: '#3b424c', lineStyle: LC.LineStyle.SparseDotted, title: '10D H' });
       put('CH10L', { price: tv.exitLow, color: '#3b424c', lineStyle: LC.LineStyle.SparseDotted, title: '10D L' });

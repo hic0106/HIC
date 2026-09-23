@@ -11,6 +11,11 @@ import { Engine } from './engine.js';
 import { ALL_STRATEGIES as STRATEGIES, META as STRATEGY_META, STRATEGY_CLASS, strategiesForSymbol, CRYPTO_STRATEGIES, TRADFI_STRATEGIES } from './strategyRegistry.js';
 import { SYMBOL_META, ASSET_CLASSES, CLASS_LABEL, isSessionSymbol } from './assets.js';
 import { Controller, CONTROLLER_MODES } from './controller/controllerEngine.js';
+import { StrategyScheduler } from './scheduler/strategyScheduler.js';
+import { SignalLog } from './scheduler/signalLog.js';
+import { CRYPTO_TIMEFRAME_CHOICES, TF_LABEL } from './scheduler/timeframes.js';
+import { RiskMonitor } from './risk/riskMonitor.js';
+import { PortfolioService } from './portfolio/portfolioService.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const HOST = process.env.HOST || '127.0.0.1';
@@ -23,11 +28,20 @@ const engine = new Engine(store, md, log);
 // Controller layer: strategies -> controller (size multiplier) -> existing execution engine
 const controller = new Controller({ store, md, engine, log });
 engine.controller = controller;
+// WHEN to evaluate (candle closes) is separated from real-time protection (every price tick).
+const signalLog = new SignalLog();
+const scheduler = new StrategyScheduler({ store, md, engine, log, signalLog });
+const portfolio = new PortfolioService({ store, engine, md, log });
+const risk = new RiskMonitor({ engine, md, log, portfolio });
 const fullSnapshot = () => {
   const s = engine.snapshot();
   try { s.controller = controller.compact(); } catch (e) { s.controller = { mode: 'ERROR', error: e.message }; }
+  try { s.scheduler = scheduler.snapshot(); } catch (e) { s.scheduler = []; log.warn(`scheduler snapshot: ${e.message}`); }
+  try { s.risk = risk.status(); } catch { s.risk = null; }
+  try { const r = portfolio.recon; s.reconciliation = { ok: r.ok, warnings: r.warnings, na: r.na || null }; } catch { s.reconciliation = null; }
   return s;
 };
+const portfolioPayload = () => { try { return portfolio.build(); } catch (e) { log.warn(`portfolio build failed: ${e.message}`, 'PORTFOLIO'); return { error: e.message }; } };
 
 const app = express();
 app.use(express.json({ limit: '100kb' }));
@@ -53,7 +67,16 @@ app.get('/api/config', (req, res) => res.json({ config: store.config, meta: {
   strategyClass: STRATEGY_CLASS, cryptoStrategies: CRYPTO_STRATEGIES, tradfiStrategies: TRADFI_STRATEGIES,
   strategiesBySymbol: Object.fromEntries(SYMBOLS.map((s) => [s, strategiesForSymbol(s)])),
   symbolMeta: SYMBOL_META, assetClasses: ASSET_CLASSES, classLabel: CLASS_LABEL,
+  timeframeChoices: CRYPTO_TIMEFRAME_CHOICES, timeframeLabel: TF_LABEL,
 } }));
+app.get('/api/portfolio', (req, res) => res.json(portfolioPayload()));
+app.get('/api/portfolio/equity', (req, res) => {
+  const range = ['1D', '7D', '1M', '3M', 'ALL'].includes(req.query.range) ? req.query.range : '1M';
+  res.json(portfolio.equitySeries(range));
+});
+app.post('/api/portfolio/refresh', async (req, res) => { await portfolio.refreshExchange('manual'); ok(res, { ok: true }); });
+app.get('/api/signals', (req, res) => res.json(signalLog.recent({ limit: Math.min(2000, Number(req.query.limit) || 500), strategy: req.query.strategy || undefined, symbol: req.query.symbol || undefined })));
+app.get('/api/scheduler', (req, res) => res.json(scheduler.snapshot()));
 app.get('/api/logs', (req, res) => res.json(log.recent(1000)));
 
 app.get('/api/klines', async (req, res) => {
@@ -80,6 +103,7 @@ app.post('/api/config/strategy/:name', (req, res) => {
     const amt = (x) => num(x, { min: 0, max: 1e7 });
     const next = {
       enabled: !!b.enabled,
+      ...(STRATEGY_CLASS[name] === 'CRYPTO' ? { timeframe: CRYPTO_TIMEFRAME_CHOICES.includes(b.timeframe) ? b.timeframe : (cur.timeframe || '1d') } : {}),
       shortEnabled: STRATEGY_META[name].supportsShort ? !!b.shortEnabled : false,
       amounts: {
         PAPER: { long: amt(b.amounts.PAPER.long), short: amt(b.amounts.PAPER.short ?? 0) },
@@ -175,7 +199,7 @@ app.post('/api/positions/close', async (req, res) => {
 });
 app.post('/api/positions/close-all', async (req, res) => {
   if (!confirmed(req, 'CLOSE ALL')) return ok(res, { ok: false, msg: 'Type CLOSE ALL to confirm' });
-  ok(res, await engine.closeAll('EMERGENCY_CLOSE'));
+  ok(res, await risk.emergencyCloseAll('EMERGENCY_CLOSE'));
 });
 
 // ---- Self-Improving Controller
@@ -279,6 +303,8 @@ wss.on('connection', (ws, req) => {
   if (origin && new URL(origin).host !== req.headers.host) { ws.close(1008, 'origin'); return; }
   ws.send(JSON.stringify({ type: 'logs', data: log.recent(500) }));
   ws.send(JSON.stringify({ type: 'snapshot', data: fullSnapshot() }));
+  ws.send(JSON.stringify({ type: 'signals', data: signalLog.recent({ limit: 500 }) }));
+  ws.send(JSON.stringify({ type: 'portfolio', data: portfolioPayload() }));
 });
 const broadcast = (msg) => {
   const s = JSON.stringify(msg);
@@ -286,6 +312,15 @@ const broadcast = (msg) => {
 };
 setInterval(() => { if (wss.clients.size) broadcast({ type: 'snapshot', data: fullSnapshot() }); }, 1000);
 log.on('log', (e) => broadcast({ type: 'log', data: e }));
+signalLog.on('signal', (r) => broadcast({ type: 'signal', data: r }));
+// Signal -> Order -> Fill -> Position -> Portfolio: pushed immediately on every change, else every 2 s
+let pfTimer = null;
+const pushPortfolio = () => { if (wss.clients.size) broadcast({ type: 'portfolio', data: portfolioPayload() }); };
+portfolio.on('change', () => {
+  if (pfTimer) return;
+  pfTimer = setTimeout(() => { pfTimer = null; pushPortfolio(); broadcast({ type: 'snapshot', data: fullSnapshot() }); }, 150);
+});
+setInterval(pushPortfolio, 2000);
 const klineThrottle = new Map();
 md.on('kline', (k) => {
   const key = `${k.symbol}:${k.interval}`;
@@ -296,17 +331,22 @@ md.on('kline', (k) => {
 });
 
 process.on('unhandledRejection', (e) => log.error(`unhandled: ${e?.message || e}`, 'ENGINE_ERROR'));
-const shutdown = () => { store.saveStateNow(); process.exit(0); };
+const shutdown = () => { store.saveStateNow(); portfolio.history.saveNow(); process.exit(0); };
 process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);
+
+// listeners attached once, before market data starts (boot() may retry)
+risk.start();
+scheduler.start();
 
 server.listen(PORT, HOST, async () => {
   log.info(`HIC Terminal listening on http://${HOST}:${PORT} — mode ${store.config.general.mode}, bots STOPPED (press START to run)`);
   const boot = async () => {
     try {
       await md.start();
-      engine.evaluateAll('init');
+      await scheduler.catchUp('init');
       controller.start();
+      portfolio.start();
       if (engine.mode === 'LIVE') engine.verifyLive(false);
     } catch (e) {
       log.error(`Market data init failed: ${e.message} — retrying in 15s`, 'API_ERROR');

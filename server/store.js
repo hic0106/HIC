@@ -30,6 +30,9 @@ export const DEFAULT_CONFIG = {
     balanceBufferPct: 2, // extra margin headroom required in balance check
     exchangeStops: true, // LIVE: also place each emergency stop on Binance (STOP_MARKET, Algo API) so it works while the PC is off
     stopWorkingType: 'CONTRACT_PRICE', // trigger source for Binance stops: CONTRACT_PRICE (last) | MARK_PRICE
+    // StrategyScheduler: a NEW entry is executed only if its signal candle closed at most N minutes ago
+    // (restart / late start). Exits are always executed. Stops never depend on this.
+    scheduler: { entryGraceMin: { '4h': 30, '1d': 120, US_SESSION: 120 }, retrySec: 15 },
   },
   // Self-Improving Controller (V1). Only scales base order amounts of NEW entries by a bounded multiplier.
   controller: {
@@ -63,6 +66,7 @@ export const DEFAULT_CONFIG = {
   strategies: {
     TURTLE: {
       enabled: true,
+      timeframe: '4h', // signal candles (4h | 1d); rules unchanged: close vs prior N-bar channel
       shortEnabled: true,
       amounts: amounts(300, 150),
       params: { entryPeriod: 20, exitPeriod: 10, smaFilter: 200 },
@@ -71,6 +75,7 @@ export const DEFAULT_CONFIG = {
     },
     ADX: {
       enabled: true,
+      timeframe: '4h',
       shortEnabled: true,
       amounts: amounts(250, 125),
       params: { adxPeriod: 14, threshold: 25, smaFilter: 200 },
@@ -79,6 +84,7 @@ export const DEFAULT_CONFIG = {
     },
     TSMOM: {
       enabled: true,
+      timeframe: '1d',
       shortEnabled: false,
       amounts: amounts(250, 0),
       params: { lookback: 30 },
@@ -122,6 +128,7 @@ export function emptyModeState(mode, config) {
     trades: [], // closed trades (max 2000)
     daySnap: null, // { day: 'YYYY-MM-DD', totalPnl }
     realizedTotal: 0,
+    scheduler: {}, // StrategyScheduler: `${strategy}:${symbol}:${timeframe}` -> last evaluated candle close (dedup)
   };
 }
 

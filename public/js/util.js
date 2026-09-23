@@ -48,3 +48,21 @@ export function toast(msg, kind = '') {
   document.getElementById('toasts').appendChild(d);
   setTimeout(() => d.remove(), kind === 'err' ? 7000 : 3500);
 }
+
+// Local time with zone label (KST when the browser is in Korea); ET for US-session items.
+const LOCAL_TZ = (() => { const off = -new Date().getTimezoneOffset(); if (off === 540) return 'KST'; const h = off / 60; return `UTC${h >= 0 ? '+' : ''}${h}`; })();
+export function fZone(ts, { date = 'auto' } = {}) {
+  if (!ts) return '—';
+  const d = new Date(ts), now = new Date();
+  const same = d.toDateString() === now.toDateString();
+  const tmr = new Date(now.getTime() + 86400000).toDateString() === d.toDateString();
+  const hm = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  const day = date === 'never' || (date === 'auto' && same) ? '' : tmr && date === 'auto' ? 'Tomorrow ' : `${pad(d.getMonth() + 1)}-${pad(d.getDate())} `;
+  return `${day}${hm} ${LOCAL_TZ}`;
+}
+const etFmt = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23', weekday: 'short' });
+export function fET(ts) {
+  if (!ts) return '—';
+  const p = Object.fromEntries(etFmt.formatToParts(new Date(ts)).map((x) => [x.type, x.value]));
+  return `${p.weekday} ${p.month}-${p.day} ${p.hour}:${p.minute} ET`;
+}

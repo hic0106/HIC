@@ -8,7 +8,7 @@ const LABEL = {
   QQQ_SMA200: 'SMA200 Regime · optional', QQQ_TURTLE_50_20: 'Slow Turtle 50/20 · optional',
 };
 const PARAMS = {
-  TURTLE: [['entryPeriod', 'Entry Period (D)', 1], ['exitPeriod', 'Exit Period (D)', 1], ['smaFilter', 'Short SMA Filter', 1]],
+  TURTLE: [['entryPeriod', 'Entry Period (bars)', 1], ['exitPeriod', 'Exit Period (bars)', 1], ['smaFilter', 'Short SMA Filter', 1]],
   ADX: [['adxPeriod', 'ADX Period', 1], ['threshold', 'ADX Threshold', 0.5], ['smaFilter', 'Short SMA Filter', 1]],
   TSMOM: [['lookback', 'Lookback (D)', 1]],
   QQQ_EMA_TREND: [['fastEma', 'Fast EMA', 1], ['slowEma', 'Slow EMA', 1], ['sma200Filter', 'SMA200 entry filter', 'bool']],
@@ -28,7 +28,7 @@ export function renderStrategiesTab(root, S, onSaved) {
   if (Object.values(dirty).some(Boolean) && root.childElementCount) return; // keep unsaved edits
   const cfg = S.config;
   const mode = cfg.general.mode;
-  root.innerHTML = `<div class="set-row-h">CRYPTO · BTCUSDT / ETHUSDT / XRPUSDT · signals on UTC daily close</div>
+  root.innerHTML = `<div class="set-row-h">CRYPTO · BTCUSDT / ETHUSDT / XRPUSDT · signals on closed Binance candles (Turtle / ADX 4H, TSMOM 1D) · stops real-time</div>
     <div class="set-grid">${S.meta.cryptoStrategies.map((n) => stratCol(n, cfg.strategies[n], mode, S.meta.supportsShort[n])).join('')}${generalCol(cfg.general)}</div>
     <div class="set-row-h">TRADFI · QQQUSDT (Invesco QQQ index perpetual) · LONG / CASH only · signals on US regular-session close (America/New_York) · Binance native history LIMITED (since 2026-04-06)</div>
     <div class="set-grid four">${S.meta.tradfiStrategies.map((n) => stratCol(n, cfg.strategies[n], mode, S.meta.supportsShort[n])).join('')}</div>`;
@@ -45,7 +45,7 @@ export function renderStrategiesTab(root, S, onSaved) {
       let r = await api('POST', url, { settings });
       if (!r.ok && r.needConfirm) {
         const w = await confirmDialog({ title: `APPLY ${name} SETTINGS TO LIVE`, danger: true, word: 'APPLY',
-          html: '<p>LIVE 자동매매가 실행 중입니다. 저장한 설정은 다음 평가(일봉 마감)부터 적용되며, 이미 보유 중인 포지션의 Stop 가격은 변경되지 않습니다.</p>' });
+          html: '<p>LIVE 자동매매가 실행 중입니다. 저장한 설정은 다음 캔들 마감 평가부터 적용되며, 이미 보유 중인 포지션의 Stop 가격은 변경되지 않습니다.</p>' });
         if (!w) return;
         r = await api('POST', url, { settings, confirm: 'APPLY' });
       }
@@ -80,6 +80,8 @@ function stratCol(name, c, mode, supportsShort) {
     ${supportsShort ? `<div class="fr"><label>Short Enabled</label><span>${sw('shortEnabled', c.shortEnabled)}</span></div>
     <div class="fr amt" data-dep="shortEnabled"><label>Short Order Amount</label>${numIn('PAPER.short', a.PAPER.short, 1, `min="0" class="${act('PAPER')}"`)}${numIn('LIVE.short', a.LIVE.short, 1, `min="0" class="${act('LIVE')}"`)}</div>`
       : '<div class="fr"><label>Short</label><span class="muted" style="text-align:right">OFF (LONG / CASH)</span></div>'}
+    ${c.timeframe ? `<div class="set-sec">Signal Timeframe</div>
+    <div class="fr"><label>Candle (closed only)</label><select name="timeframe">${['4h', '1d'].map((t) => `<option value="${t}" ${t === c.timeframe ? 'selected' : ''}>${t.toUpperCase()}</option>`).join('')}</select></div>` : ''}
     <div class="set-sec">Entry / Exit Parameters</div>
     ${PARAMS[name].map(([k, l, st]) => `<div class="fr"><label>${l}</label>${paramInput(k, c.params[k], st)}</div>`).join('')}
     <div class="set-sec">Emergency Stop Loss</div>
@@ -146,7 +148,7 @@ function readStrategy(col) {
   const params = {};
   $$('[name^="p."]', col).forEach((i) => { params[i.name.slice(2)] = i.type === 'checkbox' ? i.checked : i.value; });
   return {
-    enabled: chk('enabled'), shortEnabled: chk('shortEnabled'),
+    enabled: chk('enabled'), shortEnabled: chk('shortEnabled'), timeframe: val('timeframe'),
     amounts: { PAPER: { long: val('PAPER.long'), short: val('PAPER.short') ?? 0 }, LIVE: { long: val('LIVE.long'), short: val('LIVE.short') ?? 0 } },
     params,
     stop: { mode: val('stop.mode'), atrPeriod: val('stop.atrPeriod'), atrMult: val('stop.atrMult'), minPct: val('stop.minPct'), maxPct: val('stop.maxPct'), fixedPct: val('stop.fixedPct') },

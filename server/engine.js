@@ -4,6 +4,9 @@ import { BinanceClient, BinanceError, endpoints, floorToStep, fmtQty, roundToTic
 import { ALL_STRATEGIES as STRATEGIES, META as STRATEGY_META, evaluateStrategy as evaluate, stopDistancePct, strategiesForSymbol, STRATEGY_CLASS } from './strategyRegistry.js';
 import { SYMBOLS, emptyModeState } from './store.js';
 import { SYMBOL_META, assetClassOf, ASSET_CLASSES } from './assets.js';
+import { EventEmitter } from 'node:events';
+import { barsFor } from './scheduler/timeframes.js';
+import { reconcilePositions } from './portfolio/reconcile.js';
 
 const slotKey = (st, sym) => `${st}:${sym}`;
 const dirOf = (side) => (side === 'LONG' ? 1 : -1);
@@ -27,6 +30,8 @@ export class Engine {
     this.live = { status: 'NO_KEYS', hedgeMode: null, leverage: {}, account: null, error: null, lastCheck: 0, exchangePositions: null };
     this.liveClient = null;
     this.lastTickCheck = {};
+    this.events = new EventEmitter(); // 'change' after fills / closes -> portfolio refresh
+    this.scheduler = null; // StrategyScheduler (candle-close driven evaluation)
     this.rebuildLiveClient();
     const paper = this.ms('PAPER');
     if (paper.baseCapital == null) paper.baseCapital = paper.wallet ?? this.cfg.general.paperInitialBalance;
@@ -36,13 +41,11 @@ export class Engine {
     }
     for (const slot of Object.values(this.ms('PAPER').slots)) if (slot.pending) this.revertPending(slot);
 
-    market.on('dailyClose', ({ symbol }) => this.evaluateSymbol(symbol, 'daily close'));
-    market.on('price', ({ symbol, price }) => this.onPrice(symbol, price));
+    // Signal evaluation is driven by StrategyScheduler (candle closes); stops by RiskMonitor (every price tick).
     market.on('funding', (f) => this.onFunding(f));
     market.on('status', (s) => { if (s !== 'CONNECTED') this.log.error(`Market data ${s}`, 'CONNECTION_LOST'); else this.log.info('Market data connected'); });
 
     this.timers = [
-      setInterval(() => this.evaluateAll('periodic'), 60_000),
       setInterval(() => this.liveTick(), 10_000),
       setInterval(() => this.checkDataDelay(), 5_000),
     ];
@@ -237,35 +240,30 @@ export class Engine {
     await this.syncExchangeStops();
   }
 
+  // Exchange positions are the truth source. A mismatch is reported, never auto-fixed or hidden.
   checkPositionMismatch() {
     const ex = this.live.exchangePositions;
-    if (!ex) return;
-    const ledger = {};
-    for (const s of Object.values(this.ms('LIVE').slots)) {
-      if (!s.position) continue;
-      const k = `${s.symbol}:${s.position.side}`;
-      ledger[k] = (ledger[k] || 0) + s.position.qty;
-    }
+    if (!ex) return null;
+    const r = reconcilePositions({ slots: this.ms('LIVE').slots, exchange: ex, filters: this.md.filters, symbols: SYMBOLS });
     const now = Date.now();
-    for (const sym of SYMBOLS) for (const side of ['LONG', 'SHORT']) {
-      const p = ex.find((x) => x.symbol === sym && x.positionSide === side);
-      const exQty = p ? Math.abs(Number(p.positionAmt)) : 0;
-      const lq = ledger[`${sym}:${side}`] || 0;
-      const step = this.md.filters[sym]?.stepSize || 0;
-      if (Math.abs(exQty - lq) > step / 2 + 1e-12) {
-        const k = `mm:${sym}:${side}`;
-        if (!this._mm || !this._mm[k] || now - this._mm[k] > 300_000) {
-          (this._mm ||= {})[k] = now;
-          this.log.warn(`POSITION MISMATCH ${sym} ${side}: exchange=${exQty} bot ledger=${lq}. Manual positions or external changes detected.`, 'POSITION_MISMATCH');
-        }
+    for (const row of r.rows) {
+      if (row.status !== 'MISMATCH') continue;
+      const k = `mm:${row.symbol}:${row.side}`;
+      if (!this._mm || !this._mm[k] || now - this._mm[k] > 300_000) {
+        (this._mm ||= {})[k] = now;
+        this.log.warn(`POSITION MISMATCH ${row.symbol} ${row.side}: Exchange Qty ${row.exchangeQty} Internal ${row.internalQty} Diff ${row.diffText}. Manual positions or external changes detected.`, 'POSITION_MISMATCH');
       }
     }
+    return r;
   }
 
-  // ---------- evaluation
+  // ---------- evaluation (StrategyScheduler decides WHEN; this decides WHAT on one closed candle)
   evaluateAll(trigger) {
+    if (this.scheduler) return this.scheduler.catchUp(trigger);
     for (const sym of SYMBOLS) this.evaluateSymbol(sym, trigger);
   }
+
+  emitChange(reason) { try { this.events.emit('change', { reason, mode: this.mode }); } catch { /* listeners isolated */ } }
 
   async evaluateSymbol(symbol, trigger) {
     for (const st of strategiesForSymbol(symbol)) {
@@ -273,42 +271,49 @@ export class Engine {
     }
   }
 
-  async evaluateSlot(strategy, symbol, trigger) {
+  // Returns an outcome for the Signal Log. final=true -> this candle is done (never evaluated again).
+  // opts.allowEntry=false (stale candle after restart / late start): exits still run, new entries are skipped.
+  async evaluateSlot(strategy, symbol, trigger, opts = {}) {
     const scfg = this.cfg.strategies[strategy];
-    const candles = this.md.s[symbol].daily;
+    const candles = opts.bars || barsFor(this.md, strategy, symbol, this.cfg);
     const sig = evaluate(strategy, candles, scfg);
     const slot = this.slot(strategy, symbol);
-    if (!sig.ready) { slot.view = { notReady: sig.reason }; return; }
+    if (!sig.ready) { slot.view = { notReady: sig.reason }; return { result: 'NOT_READY', reason: sig.reason, final: false, sig }; }
     slot.view = sig.view;
     slot.evalCandle = sig.candleTime;
     slot.signal = { longCond: sig.longCond, shortCond: sig.shortCond, longExit: sig.longExit, shortExit: sig.shortExit };
+    const out = (result, final, extra = {}) => ({ result, final, sig, ...extra });
 
-    if (this.runState !== 'RUNNING' || !scfg.enabled) return;
-    if (slot.lastActedCandle === sig.candleTime) return;
+    if (this.runState !== 'RUNNING') return out('BOT_STOPPED', false);
+    if (!scfg.enabled) return out('DISABLED', false);
+    if (slot.lastActedCandle === sig.candleTime) return out('ALREADY_EVALUATED', true);
     if (slot.lastSkip && slot.lastSkip.candle !== sig.candleTime) slot.lastSkip = null;
     const sym = symbol.replace('USDT', '');
     const tag = `${strategy} ${sym}`;
+    const allowEntry = opts.allowEntry !== false;
 
     if (slot.pending) return this.skip(slot, sig, 'ORDER_PENDING', `${tag}: order pending/unknown — evaluation deferred`);
     if (this.busy.has(slotKey(strategy, symbol))) return this.skip(slot, sig, 'BUSY', `${tag}: busy`);
 
-    // 1) exits
+    // 1) exits (always allowed: they only reduce risk)
+    let exited = null;
     if (slot.position) {
       const side = slot.position.side;
       const exit = side === 'LONG' ? sig.longExit : sig.shortExit;
       if (exit) {
-        this.log.trade(`${tag} ${side} EXIT signal (${STRATEGY_META[strategy].exitRule(scfg.params)})`, 'SIGNAL');
+        this.log.trade(`${tag} ${side} EXIT signal (${STRATEGY_META[strategy].exitRule(scfg.params)})${allowEntry ? '' : ' — late evaluation'}`, 'SIGNAL');
         const r = await this.closePosition(strategy, symbol, 'STRATEGY_EXIT');
         if (!r.ok) {
           if (r.transient) return this.skip(slot, sig, r.code, r.msg);
           slot.lastActedCandle = sig.candleTime;
-          return;
+          return out(`EXIT_FAILED ${r.code || ''}`.trim(), true);
         }
+        exited = `EXIT ${side}`;
       } else {
         slot.lastSignal = `HOLD ${side}`;
         slot.lastActedCandle = sig.candleTime;
         slot.lastSkip = null;
-        return;
+        return out('HOLD', true, { side });
       }
     }
 
@@ -322,17 +327,26 @@ export class Engine {
     else if (sig.shortCond && scfg.shortEnabled && STRATEGY_META[strategy].supportsShort) side = 'SHORT';
 
     if (!side) {
-      slot.lastSignal = 'WAIT';
+      slot.lastSignal = exited ? `EXIT (STRATEGY_EXIT)` : 'WAIT';
       slot.lastActedCandle = sig.candleTime;
       slot.lastSkip = null;
-      return;
+      this.store.saveState();
+      return out(exited || 'HOLD', true);
     }
     if (slot.block[side]) {
       slot.lastSignal = `WAIT (${side} re-arm)`;
       slot.lastActedCandle = sig.candleTime;
       if (slot.lastSkip?.code !== 'REARM') this.log.info(`${tag} ${side} condition true but waiting for reset after stop exit`, 'REARM');
       slot.lastSkip = null;
-      return;
+      return out(exited ? `${exited} · WAIT_REARM ${side}` : `WAIT_REARM ${side}`, true);
+    }
+    if (!allowEntry) {
+      slot.lastSignal = `WAIT (stale ${side} signal skipped)`;
+      slot.lastActedCandle = sig.candleTime;
+      slot.lastSkip = null;
+      this.log.warn(`${tag} ${side} entry signal from candle closed ${new Date(opts.candleClose || sig.candleTime).toISOString()} is stale (${opts.staleReason || 'late'}) — entry skipped, waiting for next candle`, 'STALE_SIGNAL_SKIPPED');
+      this.store.saveState();
+      return out(exited ? `${exited} · STALE_ENTRY_SKIPPED ${side}` : `STALE_ENTRY_SKIPPED ${side}`, true);
     }
     if (!slot.lastSkip) this.log.trade(`${tag} ${side} signal (${trigger})`, 'SIGNAL');
     const r = await this.openPosition(strategy, symbol, side, sig);
@@ -340,6 +354,8 @@ export class Engine {
     slot.lastActedCandle = sig.candleTime;
     slot.lastSkip = null;
     this.store.saveState();
+    const res = r.ok ? `ENTRY ${side}` : `ENTRY_SKIPPED ${side} ${r.code || ''}`.trim();
+    return out(exited ? `${exited} · ${res}` : res, true);
   }
 
   skip(slot, sig, code, msg) {
@@ -347,7 +363,9 @@ export class Engine {
       this.log.warn(msg, code);
     }
     slot.lastSkip = { candle: sig.candleTime, code };
-    if (!TRANSIENT.has(code)) slot.lastActedCandle = sig.candleTime;
+    const final = !TRANSIENT.has(code);
+    if (final) slot.lastActedCandle = sig.candleTime;
+    return { result: `SKIP ${code}`, final, sig, transient: !final };
   }
 
   // ---------- pre-trade checks
@@ -612,11 +630,13 @@ export class Engine {
     }
     slot.pending = null;
     this.store.saveStateNow();
+    this.emitChange(pend.action === 'OPEN' ? 'fill' : 'close');
   }
 
   revertPending(slot) {
     slot.status = slot.position ? slot.position.side : 'FLAT';
     slot.pending = null;
+    this.emitChange?.('revert');
   }
 
   async resolveUnknownOrders() {
