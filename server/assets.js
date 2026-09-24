@@ -15,7 +15,7 @@ export const SYMBOL_META = {
 
 export const SYMBOLS = Object.keys(SYMBOL_META);
 export const ASSET_CLASSES = ['CRYPTO', 'TRADFI_INDEX'];
-export const CLASS_LABEL = { CRYPTO: 'CRYPTO', TRADFI_INDEX: 'TRADFI' };
+export const CLASS_LABEL = { CRYPTO: '코인', TRADFI_INDEX: '미국지수 (QQQ)' }; // display labels
 export const assetClassOf = (sym) => SYMBOL_META[sym]?.asset_class || 'CRYPTO';
 export const symbolsOfClass = (cls) => SYMBOLS.filter((s) => assetClassOf(s) === cls);
 export const isSessionSymbol = (sym) => SYMBOL_META[sym]?.session === 'US_REGULAR_MARKET';

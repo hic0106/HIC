@@ -43,9 +43,9 @@ export class ChartView {
 
   async load(symbol) {
     this.symbol = symbol;
-    this.msgEl.textContent = 'Loading…';
+    this.msgEl.textContent = '불러오는 중…';
     const rows = await api('GET', `/api/klines?symbol=${symbol}&interval=${this.interval}`);
-    if (!Array.isArray(rows)) { this.msgEl.textContent = rows.msg || 'chart data error'; return; }
+    if (!Array.isArray(rows)) { this.msgEl.textContent = rows.msg || '차트 데이터 오류'; return; }
     this.msgEl.textContent = '';
     this.data = rows.map((r) => ({ time: toT(r.t), open: r.o, high: r.h, low: r.l, close: r.c, v: r.v }));
     this.candle.setData(this.data.map(({ v, ...c }) => c));
@@ -92,7 +92,7 @@ export class ChartView {
     const ch = ((d.close / d.open) - 1) * 100;
     const c = ch >= 0 ? 'up' : 'down';
     const dp = this.dec ?? 2;
-    this.legendEl.innerHTML = `O <b class="${c}">${d.open.toFixed(dp)}</b> H <b class="${c}">${d.high.toFixed(dp)}</b> L <b class="${c}">${d.low.toFixed(dp)}</b> C <b class="${c}">${d.close.toFixed(dp)}</b> <span class="${c}">${fPct(ch)}</span> V ${fNum(v, 0)}`;
+    this.legendEl.innerHTML = `시 <b class="${c}">${d.open.toFixed(dp)}</b> 고 <b class="${c}">${d.high.toFixed(dp)}</b> 저 <b class="${c}">${d.low.toFixed(dp)}</b> 종 <b class="${c}">${d.close.toFixed(dp)}</b> <span class="${c}">${fPct(ch)}</span> 거래량 ${fNum(v, 0)}`;
   }
 
   setLine(key, opts) {
@@ -114,19 +114,19 @@ export class ChartView {
     for (const p of snap.positions.filter((x) => x.symbol === sym)) {
       if (!this.toggles[toggleKey(p.strategy)]) continue;
       const col = ST_COLOR[p.strategy];
-      put(`E:${p.strategy}`, { price: p.entryPrice, color: col, lineStyle: LC.LineStyle.Solid, title: `${p.strategy} ${p.side} ${fPct(p.pricePct)}` });
-      if (this.toggles.stops && p.stopPrice) put(`S:${p.strategy}`, { price: p.stopPrice, color: '#f6465d', lineStyle: LC.LineStyle.Dashed, title: `${p.strategy} STOP` });
-      if (this.toggles.stops && p.tpPrice) put(`T:${p.strategy}`, { price: p.tpPrice, color: '#0ecb81', lineStyle: LC.LineStyle.Dashed, title: `${p.strategy} TP` });
+      put(`E:${p.strategy}`, { price: p.entryPrice, color: col, lineStyle: LC.LineStyle.Solid, title: `${p.strategy} ${p.side === 'LONG' ? '롱' : '숏'} ${fPct(p.pricePct)}` });
+      if (this.toggles.stops && p.stopPrice) put(`S:${p.strategy}`, { price: p.stopPrice, color: '#f6465d', lineStyle: LC.LineStyle.Dashed, title: `${p.strategy} 손절` });
+      if (this.toggles.stops && p.tpPrice) put(`T:${p.strategy}`, { price: p.tpPrice, color: '#0ecb81', lineStyle: LC.LineStyle.Dashed, title: `${p.strategy} 익절` });
     }
     const tv = snap.slots.find((x) => x.strategy === 'TURTLE' && x.symbol === sym)?.view || {};
     const av = snap.slots.find((x) => x.strategy === 'ADX' && x.symbol === sym)?.view || {};
     const smaV = tv.sma ?? av.sma;
     if (this.toggles.sma && this.interval !== '1d' && smaV) put('SMA', { price: smaV, color: '#8e7cc3', lineStyle: LC.LineStyle.Dotted, title: 'D SMA200' });
     if (this.toggles.channel && tv.entryHigh) {
-      put('CH20H', { price: tv.entryHigh, color: '#5b6472', lineStyle: LC.LineStyle.Dotted, title: 'CH H' });
-      put('CH20L', { price: tv.entryLow, color: '#5b6472', lineStyle: LC.LineStyle.Dotted, title: '20D L' });
-      put('CH10H', { price: tv.exitHigh, color: '#3b424c', lineStyle: LC.LineStyle.SparseDotted, title: '10D H' });
-      put('CH10L', { price: tv.exitLow, color: '#3b424c', lineStyle: LC.LineStyle.SparseDotted, title: '10D L' });
+      put('CH20H', { price: tv.entryHigh, color: '#5b6472', lineStyle: LC.LineStyle.Dotted, title: '진입 고가' });
+      put('CH20L', { price: tv.entryLow, color: '#5b6472', lineStyle: LC.LineStyle.Dotted, title: '진입 저가' });
+      put('CH10H', { price: tv.exitHigh, color: '#3b424c', lineStyle: LC.LineStyle.SparseDotted, title: '청산 고가' });
+      put('CH10L', { price: tv.exitLow, color: '#3b424c', lineStyle: LC.LineStyle.SparseDotted, title: '청산 저가' });
     }
     for (const [k, line] of this.lines) if (!want.has(k)) { this.candle.removePriceLine(line); this.lines.delete(k); }
 

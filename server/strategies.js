@@ -7,13 +7,13 @@ import { sma, atr, adx, priorHigh, priorLow, logMomentum } from './indicators.js
 export const STRATEGIES = ['TURTLE', 'ADX', 'TSMOM'];
 
 export const STRATEGY_META = {
-  TURTLE: { label: 'Turtle 20/10', short: 'T', supportsShort: true, exitRule: (p) => `${p.exitPeriod}-bar Channel`,
+  TURTLE: { label: 'Turtle 20/10', short: 'T', supportsShort: true, exitRule: (p) => `${p.exitPeriod}봉 채널 이탈`,
     // Breakout is an event: re-entry after a stop only needs a new breakout close.
     resetAfterStop: false },
-  ADX: { label: 'ADX Trend', short: 'A', supportsShort: true, exitRule: (p) => `ADX<=${p.threshold} / DI Cross`,
+  ADX: { label: 'ADX Trend', short: 'A', supportsShort: true, exitRule: (p) => `ADX ${p.threshold} 이하 또는 DI 교차`,
     // State condition: after a stop, condition must turn false once before re-entering.
     resetAfterStop: true },
-  TSMOM: { label: 'TSMOM 30D', short: 'M', supportsShort: false, exitRule: (p) => `${p.lookback}D Mom <= 0`,
+  TSMOM: { label: 'TSMOM 30D', short: 'M', supportsShort: false, exitRule: (p) => `${p.lookback}일 모멘텀 0 이하`,
     resetAfterStop: true },
 };
 

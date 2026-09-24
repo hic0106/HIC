@@ -57,7 +57,7 @@ export function fZone(ts, { date = 'auto' } = {}) {
   const same = d.toDateString() === now.toDateString();
   const tmr = new Date(now.getTime() + 86400000).toDateString() === d.toDateString();
   const hm = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
-  const day = date === 'never' || (date === 'auto' && same) ? '' : tmr && date === 'auto' ? 'Tomorrow ' : `${pad(d.getMonth() + 1)}-${pad(d.getDate())} `;
+  const day = date === 'never' || (date === 'auto' && same) ? '' : tmr && date === 'auto' ? '내일 ' : `${pad(d.getMonth() + 1)}-${pad(d.getDate())} `;
   return `${day}${hm} ${LOCAL_TZ}`;
 }
 const etFmt = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23', weekday: 'short' });

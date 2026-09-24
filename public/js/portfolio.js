@@ -6,7 +6,9 @@ import { ST_COLOR } from './chart.js';
 const LC = window.LightweightCharts;
 const SYM_COLOR = { BTCUSDT: '#f7931a', ETHUSDT: '#627eea', XRPUSDT: '#9aa4b1', QQQUSDT: '#26c6da', CASH: '#2b3440' };
 const CLASS_COLOR = { CRYPTO: '#f0b90b', TRADFI_INDEX: '#26c6da', CASH: '#2b3440' };
-const SHORT = { TURTLE: 'TURTLE', ADX: 'ADX', TSMOM: 'TSMOM', QQQ_EMA_TREND: 'QQQ EMA', QQQ_TSMOM: 'QQQ TSMOM', QQQ_SMA200: 'QQQ SMA200', QQQ_TURTLE_50_20: 'QQQ T50/20', UNATTRIBUTED: 'UNATTRIBUTED' };
+const SHORT = { TURTLE: '터틀', ADX: 'ADX', TSMOM: 'TSMOM', QQQ_EMA_TREND: 'QQQ EMA', QQQ_TSMOM: 'QQQ TSMOM', QQQ_SMA200: 'QQQ SMA200', QQQ_TURTLE_50_20: 'QQQ 터틀50/20', UNATTRIBUTED: '미귀속(수동)' };
+const SIDE = { LONG: '롱', SHORT: '숏' };
+const LBL = { ALL: '전체', CRYPTO: '코인', TRADFI: 'QQQ', LONG: '롱', SHORT: '숏', TURTLE: '터틀', ADX: 'ADX', TSMOM: 'TSMOM', QQQ: 'QQQ', TODAY: '오늘', '7D': '7일', '30D': '30일', '1D': '1일', '1M': '1개월', '3M': '3개월' };
 const TZ = -new Date().getTimezoneOffset() * 60;
 
 const P = {
@@ -25,28 +27,28 @@ export function mountPortfolio(root, meta) {
     <div id="pfWarn"></div>
     <div class="pf-summary" id="pfSummary"></div>
     <div class="pf-row two">
-      <div class="pf-card"><div class="panel-h">EQUITY CURVE <span class="pf-tools"><span class="seg" id="pfRange">${['1D', '7D', '1M', '3M', 'ALL'].map((r) => `<button data-r="${r}" class="${r === P.range ? 'on' : ''}">${r}</button>`).join('')}</span>
-        <label class="muted"><input type="checkbox" id="pfOverlay" ${P.overlay ? 'checked' : ''}> strategy PnL overlay</label></span></div>
+      <div class="pf-card"><div class="panel-h">자산 변화 <span class="pf-tools"><span class="seg" id="pfRange">${['1D', '7D', '1M', '3M', 'ALL'].map((r) => `<button data-r="${r}" class="${r === P.range ? 'on' : ''}">${LBL[r]}</button>`).join('')}</span>
+        <label class="muted"><input type="checkbox" id="pfOverlay" ${P.overlay ? 'checked' : ''}> 전략별 손익 함께 보기</label></span></div>
         <div id="pfCurve"></div><div class="pf-dd" id="pfDd"></div></div>
-      <div class="pf-card"><div class="panel-h">ASSET ALLOCATION <span class="muted">margin share of equity</span></div><div id="pfAlloc"></div></div>
+      <div class="pf-card"><div class="panel-h">자산 배분 <span class="muted">총 자산 중 증거금 비중</span></div><div id="pfAlloc"></div></div>
     </div>
     <div class="pf-row two">
-      <div class="pf-card"><div class="panel-h">LONG / SHORT EXPOSURE <span class="muted">short = short exposure (not a negative asset)</span></div><div id="pfExpo"></div></div>
-      <div class="pf-card"><div class="panel-h">STRATEGY ALLOCATION <span class="muted">Strategy View · attribution of the bot ledger</span></div><div id="pfStrat"></div></div>
+      <div class="pf-card"><div class="panel-h">롱 / 숏 규모 <span class="muted">숏은 음수 자산이 아니라 숏 포지션 규모</span></div><div id="pfExpo"></div></div>
+      <div class="pf-card"><div class="panel-h">전략별 자산 <span class="muted">봇 장부 기준 전략별 구분</span></div><div id="pfStrat"></div></div>
     </div>
     <div class="pf-row two">
-      <div class="pf-card"><div class="panel-h">EXCHANGE VIEW <span class="muted" id="pfExSrc"></span></div><div id="pfExchange"></div></div>
-      <div class="pf-card"><div class="panel-h">RECONCILIATION <span class="muted">exchange (truth) vs strategy ledger · never auto-fixed</span></div><div id="pfRecon"></div></div>
+      <div class="pf-card"><div class="panel-h">거래소 실제 계좌 <span class="muted" id="pfExSrc"></span></div><div id="pfExchange"></div></div>
+      <div class="pf-card"><div class="panel-h">포지션 대조 <span class="muted">거래소(기준) vs 봇 장부 · 자동 수정 안 함</span></div><div id="pfRecon"></div></div>
     </div>
-    <div class="pf-card"><div class="panel-h">ALL POSITIONS <span class="pf-tools" id="pfPosFilter">
-        <span class="seg" data-f="cls">${['ALL', 'CRYPTO', 'TRADFI'].map((x) => `<button data-v="${x}" class="${x === 'ALL' ? 'on' : ''}">${x}</button>`).join('')}</span>
-        <span class="seg" data-f="side">${['ALL', 'LONG', 'SHORT'].map((x) => `<button data-v="${x}" class="${x === 'ALL' ? 'on' : ''}">${x}</button>`).join('')}</span>
-        <span class="seg" data-f="st">${['ALL', 'TURTLE', 'ADX', 'TSMOM', 'QQQ'].map((x) => `<button data-v="${x}" class="${x === 'ALL' ? 'on' : ''}">${x}</button>`).join('')}</span></span></div>
+    <div class="pf-card"><div class="panel-h">전체 포지션 <span class="pf-tools" id="pfPosFilter">
+        <span class="seg" data-f="cls">${['ALL', 'CRYPTO', 'TRADFI'].map((x) => `<button data-v="${x}" class="${x === 'ALL' ? 'on' : ''}">${LBL[x]}</button>`).join('')}</span>
+        <span class="seg" data-f="side">${['ALL', 'LONG', 'SHORT'].map((x) => `<button data-v="${x}" class="${x === 'ALL' ? 'on' : ''}">${LBL[x]}</button>`).join('')}</span>
+        <span class="seg" data-f="st">${['ALL', 'TURTLE', 'ADX', 'TSMOM', 'QQQ'].map((x) => `<button data-v="${x}" class="${x === 'ALL' ? 'on' : ''}">${LBL[x]}</button>`).join('')}</span></span></div>
       <div id="pfPositions"></div></div>
     <div class="pf-row two">
-      <div class="pf-card"><div class="panel-h">PNL BREAKDOWN <span class="pf-tools"><span class="seg" id="pfPeriod">${['TODAY', '7D', '30D', 'ALL'].map((x) => `<button data-v="${x}" class="${x === P.period ? 'on' : ''}">${x}</button>`).join('')}</span>
-        <span class="seg" id="pfGroup">${[['bySymbol', 'SYMBOL'], ['byStrategy', 'STRATEGY'], ['byClass', 'ASSET CLASS']].map(([k, l]) => `<button data-v="${k}" class="${k === P.group ? 'on' : ''}">${l}</button>`).join('')}</span></span></div><div id="pfPnl"></div></div>
-      <div class="pf-card"><div class="panel-h">GROSS PNL · FEES · FUNDING · NET</div><div id="pfCosts"></div></div>
+      <div class="pf-card"><div class="panel-h">손익 분석 <span class="pf-tools"><span class="seg" id="pfPeriod">${['TODAY', '7D', '30D', 'ALL'].map((x) => `<button data-v="${x}" class="${x === P.period ? 'on' : ''}">${LBL[x]}</button>`).join('')}</span>
+        <span class="seg" id="pfGroup">${[['bySymbol', '종목별'], ['byStrategy', '전략별'], ['byClass', '자산군별']].map(([k, l]) => `<button data-v="${k}" class="${k === P.group ? 'on' : ''}">${l}</button>`).join('')}</span></span></div><div id="pfPnl"></div></div>
+      <div class="pf-card"><div class="panel-h">매매손익 · 수수료 · 펀딩비 · 순손익</div><div id="pfCosts"></div></div>
     </div>`;
   $('#pfRange', root).onclick = (e) => { const b = e.target.closest('button'); if (!b) return; P.range = b.dataset.r; localSet('pfRange', P.range); $$('#pfRange button', root).forEach((x) => x.classList.toggle('on', x === b)); loadCurve(); };
   $('#pfOverlay', root).onchange = (e) => { P.overlay = e.target.checked; localSet('pfOverlay', P.overlay ? '1' : '0'); loadCurve(); };
@@ -77,16 +79,16 @@ const kpi = (label, value, c = '', sub = '', xl = false) => `<div class="pf-kpi 
 function renderSummary() {
   const d = P.data, s = d.summary;
   const warn = d.reconciliation && !d.reconciliation.ok;
-  $('#pfWarn').innerHTML = warn ? `<div class="pf-banner"><b>RECONCILIATION WARNING · POSITION MISMATCH</b> ${d.reconciliation.warnings.map(esc).join(' · ')} <span class="muted">— exchange position differs from the strategy ledger (manual trade / external change). Nothing is hidden or auto-corrected.</span></div>` : '';
-  const ctl = d.controllerMode && d.controllerMode !== 'OFF' ? `<span class="tag OFF" title="Controller only scales new entry sizes">CTRL ${esc(d.controllerMode)}</span>` : '';
+  $('#pfWarn').innerHTML = warn ? `<div class="pf-banner"><b>포지션 불일치 경고</b> ${d.reconciliation.warnings.map((w) => esc(w.replace('Exchange Qty', '거래소 수량').replace('Internal', '봇 장부').replace('Diff', '차이').replace(' LONG ', ' 롱 ').replace(' SHORT ', ' 숏 '))).join(' · ')} <span class="muted">— 거래소 포지션이 봇 장부와 다릅니다 (수동 거래 또는 외부 변경). 숨기거나 자동으로 고치지 않습니다.</span></div>` : '';
+  const ctl = d.controllerMode && d.controllerMode !== 'OFF' ? `<span class="tag OFF" title="자동 조절은 신규 진입 금액만 바꿉니다">자동조절 ${esc({ OBSERVE: '관찰만', PAPER_AUTO: '모의 자동', LIVE_APPROVAL: '실전 승인제' }[d.controllerMode] || d.controllerMode)}</span>` : '';
   $('#pfSummary').innerHTML = [
-    kpi('Total Equity <i>USDT</i>', fUsd(s.equity), '', d.exchange.live ? `LIVE · Binance ${esc(d.exchange.source)}` : 'PAPER · simulated', true),
-    kpi("Today's PnL <i>UTC 00:00</i>", fSigned(s.todayPnl), cls(s.todayPnl), s.baseCapital ? fPct(s.todayPnl / s.baseCapital * 100) : '', true),
-    kpi('Total Return', s.totalReturnPct != null ? fPct(s.totalReturnPct) : '—', cls(s.totalReturnPct), s.baseCapital ? `base ${fUsd(s.baseCapital, 0)}` : 'base not set', true),
-    kpi('Available', fUsd(s.available)), kpi('Total Invested', fUsd(s.invested), '', 'entry value'), kpi('Position Value', fUsd(s.positionValue), '', 'mark value'),
-    kpi('Unrealized PnL', fSigned(s.unrealized), cls(s.unrealized), 'exchange'), kpi('Realized Today', fSigned(s.realizedToday), cls(s.realizedToday), s.realizedTodaySource === 'BINANCE_INCOME' ? 'Binance income' : 'ledger'),
-    kpi('Total PnL', fSigned(s.totalPnl), cls(s.totalPnl), 'net of fees/funding'),
-    kpi('Drawdown', d.drawdown.currentPct != null ? `−${d.drawdown.currentPct.toFixed(2)}%` : '—', d.drawdown.currentPct > 0 ? 'down' : '', d.drawdown.maxPct != null ? `max −${d.drawdown.maxPct.toFixed(2)}%` : 'no history'),
+    kpi('총 자산 <i>USDT</i>', fUsd(s.equity), '', d.exchange.live ? `실전 · Binance ${esc(d.exchange.source === 'WS' ? '실시간' : d.exchange.source === 'REST' ? '조회' : d.exchange.source)}` : '모의투자', true),
+    kpi('오늘 손익 <i>09시 기준</i>', fSigned(s.todayPnl), cls(s.todayPnl), s.baseCapital ? fPct(s.todayPnl / s.baseCapital * 100) : '', true),
+    kpi('총 수익률', s.totalReturnPct != null ? fPct(s.totalReturnPct) : '—', cls(s.totalReturnPct), s.baseCapital ? `원금 ${fUsd(s.baseCapital, 0)}` : '원금 미설정', true),
+    kpi('주문 가능', fUsd(s.available)), kpi('투자 원금', fUsd(s.invested), '', '진입가 기준'), kpi('포지션 가치', fUsd(s.positionValue), '', '현재가 기준'),
+    kpi('평가손익', fSigned(s.unrealized), cls(s.unrealized), '거래소 기준'), kpi('오늘 실현손익', fSigned(s.realizedToday), cls(s.realizedToday), s.realizedTodaySource === 'BINANCE_INCOME' ? 'Binance 정산 기준' : '봇 장부 기준'),
+    kpi('누적 손익', fSigned(s.totalPnl), cls(s.totalPnl), '수수료·펀딩 반영'),
+    kpi('고점 대비 하락', d.drawdown.currentPct != null ? `−${d.drawdown.currentPct.toFixed(2)}%` : '—', d.drawdown.currentPct > 0 ? 'down' : '', d.drawdown.maxPct != null ? `최대 −${d.drawdown.maxPct.toFixed(2)}%` : '기록 없음'),
     `<div class="pf-kpi badge">${ctl}<small>${fZone(d.ts)}</small></div>`,
   ].join('');
 }
@@ -101,59 +103,59 @@ function donut(parts) {
 
 function renderAlloc() {
   const a = P.data.allocation;
-  const items = [...a.bySymbol.map((x) => ({ k: x.symbol, label: x.symbol.replace('USDT', ''), v: x.margin, pct: x.pct, notional: x.notional, c: SYM_COLOR[x.symbol] })), { k: 'CASH', label: 'CASH', v: a.cash, pct: a.cashPct, c: SYM_COLOR.CASH }];
+  const items = [...a.bySymbol.map((x) => ({ k: x.symbol, label: x.symbol.replace('USDT', ''), v: x.margin, pct: x.pct, notional: x.notional, c: SYM_COLOR[x.symbol] })), { k: 'CASH', label: '현금', v: a.cash, pct: a.cashPct, c: SYM_COLOR.CASH }];
   const cl = a.byClass;
   const bar = (k, v) => `<div class="pf-bar"><span style="width:${Math.max(0, Math.min(100, v || 0))}%;background:${CLASS_COLOR[k]}"></span></div>`;
   $('#pfAlloc').innerHTML = `<div class="pf-alloc">${donut(items)}
-    <table class="t compact"><thead><tr><th>Asset</th><th>Margin</th><th>Notional</th><th>%</th><th></th></tr></thead><tbody>
+    <table class="t compact"><thead><tr><th>자산</th><th>증거금</th><th>포지션 금액</th><th>%</th><th></th></tr></thead><tbody>
     ${items.map((x) => `<tr><td><i class="sw-dot" style="background:${x.c}"></i>${x.label}</td><td>${fNum(x.v, 2)}</td><td>${x.notional != null ? fNum(x.notional, 2) : ''}</td><td>${x.pct != null ? x.pct.toFixed(1) + '%' : '—'}</td><td class="l" style="width:34%"><div class="pf-bar"><span style="width:${Math.max(0, Math.min(100, x.pct || 0))}%;background:${x.c}"></span></div></td></tr>`).join('')}
     </tbody></table></div>
-    <table class="t compact"><tbody>${[['CRYPTO', 'CRYPTO'], ['TRADFI_INDEX', 'TRADFI'], ['CASH', 'CASH']].map(([k, l]) => `<tr><td style="width:80px">${l}</td><td style="width:90px">${fNum(cl[k]?.margin, 2)}</td><td style="width:60px">${cl[k]?.pct != null ? cl[k].pct.toFixed(1) + '%' : '—'}</td><td class="l">${bar(k, cl[k]?.pct)}</td></tr>`).join('')}</tbody></table>`;
+    <table class="t compact"><tbody>${[['CRYPTO', '코인'], ['TRADFI_INDEX', 'QQQ'], ['CASH', '현금']].map(([k, l]) => `<tr><td style="width:80px">${l}</td><td style="width:90px">${fNum(cl[k]?.margin, 2)}</td><td style="width:60px">${cl[k]?.pct != null ? cl[k].pct.toFixed(1) + '%' : '—'}</td><td class="l">${bar(k, cl[k]?.pct)}</td></tr>`).join('')}</tbody></table>`;
 }
 
 function renderExpo() {
   const x = P.data.exposure;
   const max = Math.max(x.grossLong, x.grossShort, Math.abs(x.net), 1);
-  const line = (l, v, c) => `<div class="pf-exp"><label>${l}</label><div class="pf-bar"><span style="width:${(Math.abs(v) / max) * 100}%;background:${c}"></span></div><b class="${l === 'NET' ? cls(v) : ''}">${l === 'NET' ? fSigned(v) : fUsd(v)}</b></div>`;
+  const line = (l, v, c) => `<div class="pf-exp"><label>${l}</label><div class="pf-bar"><span style="width:${(Math.abs(v) / max) * 100}%;background:${c}"></span></div><b class="${l === '순 노출' ? cls(v) : ''}">${l === '순 노출' ? fSigned(v) : fUsd(v)}</b></div>`;
   const rows = Object.entries(x.bySymbol).filter(([, b]) => b.rows.length).map(([sym, b]) => `<tr class="grp"><td>${sym.replace('USDT', '')}</td><td class="up">${fNum(b.long, 2)}</td><td class="down">${fNum(b.short, 2)}</td><td>${fNum(b.gross, 2)}</td><td class="${cls(b.net)}">${fSigned(b.net)}</td></tr>
-    ${b.rows.map((r) => `<tr><td class="l" style="padding-left:18px">${SHORT[r.strategy] || r.strategy} <span class="side-${r.side}">${r.side}</span></td><td colspan="3"></td><td class="${cls(r.value)}">${fSigned(r.value)}</td></tr>`).join('')}`).join('');
-  $('#pfExpo').innerHTML = `${line('GROSS LONG', x.grossLong, 'var(--up)')}${line('GROSS SHORT', x.grossShort, 'var(--down)')}${line('NET', x.net, 'var(--info)')}
-    <div class="muted" style="padding:2px 10px 4px">Gross ${fUsd(x.gross)} · Crypto L ${fNum(x.byClass.CRYPTO.long, 0)} / S ${fNum(x.byClass.CRYPTO.short, 0)} · TradFi L ${fNum(x.byClass.TRADFI_INDEX.long, 0)} / S ${fNum(x.byClass.TRADFI_INDEX.short, 0)}</div>
-    ${rows ? `<table class="t compact"><thead><tr><th>Coin / Strategy</th><th>Long</th><th>Short</th><th>Gross</th><th>Net</th></tr></thead><tbody>${rows}</tbody></table>` : '<div class="empty">No exposure</div>'}`;
+    ${b.rows.map((r) => `<tr><td class="l" style="padding-left:18px">${SHORT[r.strategy] || r.strategy} <span class="side-${r.side}">${SIDE[r.side]}</span></td><td colspan="3"></td><td class="${cls(r.value)}">${fSigned(r.value)}</td></tr>`).join('')}`).join('');
+  $('#pfExpo').innerHTML = `${line('롱 합계', x.grossLong, 'var(--up)')}${line('숏 합계', x.grossShort, 'var(--down)')}${line('순 노출', x.net, 'var(--info)')}
+    <div class="muted" style="padding:2px 10px 4px">총 규모 ${fUsd(x.gross)} · 코인 롱 ${fNum(x.byClass.CRYPTO.long, 0)} / 숏 ${fNum(x.byClass.CRYPTO.short, 0)} · QQQ 롱 ${fNum(x.byClass.TRADFI_INDEX.long, 0)} / 숏 ${fNum(x.byClass.TRADFI_INDEX.short, 0)}</div>
+    ${rows ? `<table class="t compact"><thead><tr><th>종목 / 전략</th><th>롱</th><th>숏</th><th>합계</th><th>순</th></tr></thead><tbody>${rows}</tbody></table>` : '<div class="empty">포지션 없음</div>'}`;
 }
 
 function renderStrat() {
   const d = P.data;
   let last = null;
-  const rows = d.strategyView.map((s) => { const g = s.assetClass !== last ? `<tr class="grp"><td colspan="9">${s.assetClass === 'CRYPTO' ? 'CRYPTO' : 'TRADFI · QQQ'}</td></tr>` : ''; last = s.assetClass; return g + `<tr class="${s.enabled || s.positions ? '' : 'dim'}">
-    <td class="l"><i class="sw-dot" style="background:${ST_COLOR[s.strategy]}"></i><b>${SHORT[s.strategy]}</b>${s.ctrlMultipliers.some((m) => m !== 1) ? ` <span class="tag PENDING" title="controller multiplier on open entries">×${s.ctrlMultipliers.join('/')}</span>` : ''}</td>
+  const rows = d.strategyView.map((s) => { const g = s.assetClass !== last ? `<tr class="grp"><td colspan="9">${s.assetClass === 'CRYPTO' ? '코인' : '미국지수 · QQQ'}</td></tr>` : ''; last = s.assetClass; return g + `<tr class="${s.enabled || s.positions ? '' : 'dim'}">
+    <td class="l"><i class="sw-dot" style="background:${ST_COLOR[s.strategy]}"></i><b>${SHORT[s.strategy]}</b>${s.ctrlMultipliers.some((m) => m !== 1) ? ` <span class="tag PENDING" title="보유 포지션의 자동 조절 배수">×${s.ctrlMultipliers.join('/')}</span>` : ''}</td>
     <td>${s.positions}</td><td>${fNum(s.invested, 2)}</td><td>${fNum(s.positionValue, 2)}</td><td class="up">${fNum(s.long, 0)}</td><td class="down">${fNum(s.short, 0)}</td>
     <td class="${cls(s.unrealized)}">${fSigned(s.unrealized)}</td><td class="${cls(s.realizedToday)}">${fSigned(s.realizedToday)}</td><td class="${cls(s.realizedTotal)}">${fSigned(s.realizedTotal)}</td></tr>`; }).join('');
   const t = (k) => d.strategyView.reduce((a, s) => a + s[k], 0);
-  $('#pfStrat').innerHTML = `<table class="t compact"><thead><tr><th>Strategy</th><th>Pos</th><th>Invested</th><th>Value</th><th>Long</th><th>Short</th><th>Unrealized</th><th>Realized Today</th><th>Realized All</th></tr></thead><tbody>${rows}</tbody>
-    <tfoot><tr><td>TOTAL</td><td>${t('positions')}</td><td>${fNum(t('invested'), 2)}</td><td>${fNum(t('positionValue'), 2)}</td><td class="up">${fNum(t('long'), 0)}</td><td class="down">${fNum(t('short'), 0)}</td><td class="${cls(t('unrealized'))}">${fSigned(t('unrealized'))}</td><td class="${cls(t('realizedToday'))}">${fSigned(t('realizedToday'))}</td><td class="${cls(t('realizedTotal'))}">${fSigned(t('realizedTotal'))}</td></tr>
-    ${d.unattributedValue ? `<tr><td colspan="9" class="l warn">+ UNATTRIBUTED exchange positions ${fUsd(d.unattributedValue)} (not in any strategy)</td></tr>` : ''}</tfoot></table>`;
+  $('#pfStrat').innerHTML = `<table class="t compact"><thead><tr><th>전략</th><th>포지션</th><th>투자 원금</th><th>현재 가치</th><th>롱</th><th>숏</th><th>평가손익</th><th>오늘 실현</th><th>누적 실현</th></tr></thead><tbody>${rows}</tbody>
+    <tfoot><tr><td>합계</td><td>${t('positions')}</td><td>${fNum(t('invested'), 2)}</td><td>${fNum(t('positionValue'), 2)}</td><td class="up">${fNum(t('long'), 0)}</td><td class="down">${fNum(t('short'), 0)}</td><td class="${cls(t('unrealized'))}">${fSigned(t('unrealized'))}</td><td class="${cls(t('realizedToday'))}">${fSigned(t('realizedToday'))}</td><td class="${cls(t('realizedTotal'))}">${fSigned(t('realizedTotal'))}</td></tr>
+    ${d.unattributedValue ? `<tr><td colspan="9" class="l warn">+ 전략에 속하지 않은 거래소 포지션 ${fUsd(d.unattributedValue)} (수동 거래 등)</td></tr>` : ''}</tfoot></table>`;
 }
 
 function renderExchange() {
   const e = P.data.exchange;
   const f = (sym) => P.data._filters?.[sym];
-  $('#pfExSrc').textContent = e.live ? `Binance · ${e.source}${e.stream ? ' · User Stream ' + e.stream : ''}${e.updatedAt ? ' · ' + fZone(e.updatedAt) : ''}` : e.source;
+  $('#pfExSrc').textContent = e.live ? `Binance · ${e.source === 'WS' ? '실시간 반영' : '주기 조회'}${e.stream ? ' · 실시간 연결 ' + ({ CONNECTED: '연결됨', CONNECTING: '연결 중', DISCONNECTED: '끊김', ERROR: '오류', OFF: '꺼짐' }[e.stream] || e.stream) : ''}${e.updatedAt ? ' · ' + fZone(e.updatedAt) : ''}` : '모의투자 가상 계좌';
   $('#pfExchange').innerHTML = `<table class="t compact kv pf-kv"><tbody>
-      <tr><td>Wallet Balance</td><td>${fUsd(e.wallet)}</td><td>Margin Balance (Equity)</td><td>${fUsd(e.marginBalance)}</td></tr>
-      <tr><td>Available Balance</td><td>${fUsd(e.available)}</td><td>Unrealized PnL</td><td class="${cls(e.unrealized)}">${fSigned(e.unrealized)}</td></tr>
+      <tr><td>지갑 잔고</td><td>${fUsd(e.wallet)}</td><td>총 자산 (마진 잔고)</td><td>${fUsd(e.marginBalance)}</td></tr>
+      <tr><td>주문 가능</td><td>${fUsd(e.available)}</td><td>평가손익</td><td class="${cls(e.unrealized)}">${fSigned(e.unrealized)}</td></tr>
       ${e.error ? `<tr><td colspan="4" class="l down">${esc(e.error)}</td></tr>` : ''}</tbody></table>
-    ${e.positions.length ? `<table class="t compact"><thead><tr><th>Symbol</th><th>Side</th><th>Qty</th><th>Entry</th><th>Mark</th><th>Notional</th><th>Margin</th><th>Unrealized</th><th>Liq. Price</th><th>Lev</th></tr></thead><tbody>
-      ${e.positions.map((p) => `<tr><td class="l">${p.symbol}</td><td class="l side-${p.side}">${p.side}</td><td>${p.qty}</td><td>${fPrice(p.entryPrice, f(p.symbol))}</td><td>${fPrice(p.markPrice, f(p.symbol))}</td><td>${fNum(p.notional, 2)}</td><td>${fNum(p.initialMargin, 2)}</td><td class="${cls(p.unrealized)}">${fSigned(p.unrealized)}</td><td>${p.liquidationPrice ? fPrice(p.liquidationPrice, f(p.symbol)) : '—'}</td><td>${p.leverage ? p.leverage + 'x' : '—'}</td></tr>`).join('')}</tbody></table>` : '<div class="empty">No exchange positions</div>'}`;
+    ${e.positions.length ? `<table class="t compact"><thead><tr><th>종목</th><th>방향</th><th>수량</th><th>진입가</th><th>현재가</th><th>포지션 금액</th><th>증거금</th><th>평가손익</th><th>청산가</th><th>레버리지</th></tr></thead><tbody>
+      ${e.positions.map((p) => `<tr><td class="l">${p.symbol}</td><td class="l side-${p.side}">${SIDE[p.side]}</td><td>${p.qty}</td><td>${fPrice(p.entryPrice, f(p.symbol))}</td><td>${fPrice(p.markPrice, f(p.symbol))}</td><td>${fNum(p.notional, 2)}</td><td>${fNum(p.initialMargin, 2)}</td><td class="${cls(p.unrealized)}">${fSigned(p.unrealized)}</td><td>${p.liquidationPrice ? fPrice(p.liquidationPrice, f(p.symbol)) : '—'}</td><td>${p.leverage ? p.leverage + '배' : '—'}</td></tr>`).join('')}</tbody></table>` : '<div class="empty">거래소 포지션 없음</div>'}`;
 }
 
 function renderRecon() {
   const r = P.data.reconciliation;
-  if (r.na === 'PAPER') { $('#pfRecon').innerHTML = '<div class="empty">PAPER mode — the internal ledger is the account (no exchange to reconcile)</div>'; return; }
-  if (r.na === 'NO_SNAPSHOT') { $('#pfRecon').innerHTML = '<div class="empty">Waiting for the first Binance snapshot…</div>'; return; }
-  $('#pfRecon').innerHTML = `<div class="pf-recon ${r.ok ? 'ok' : 'bad'}">${r.ok ? '● RECONCILED — exchange positions match strategy ledger' : '● POSITION MISMATCH'} <span class="muted">${r.checkedAt ? fZone(r.checkedAt) : ''}</span></div>
-    ${r.rows.length ? `<table class="t compact"><thead><tr><th>Symbol</th><th>Side</th><th>Exchange Qty</th><th>Internal Qty</th><th>Diff</th><th>Status</th></tr></thead><tbody>
-    ${r.rows.map((x) => `<tr><td class="l">${x.symbol}</td><td class="l side-${x.side}">${x.side}</td><td>${x.exchangeQty}</td><td>${x.internalQty}</td><td class="${x.diff ? 'warn' : ''}">${x.diffText}</td><td class="${x.status === 'OK' ? 'up' : x.status === 'SYNCING' ? 'warn' : 'down'}"><b>${x.status}</b></td></tr>`).join('')}</tbody></table>` : '<div class="empty">No positions on exchange or ledger</div>'}`;
+  if (r.na === 'PAPER') { $('#pfRecon').innerHTML = '<div class="empty">모의투자 모드 — 봇 장부가 곧 계좌라 대조할 거래소가 없습니다</div>'; return; }
+  if (r.na === 'NO_SNAPSHOT') { $('#pfRecon').innerHTML = '<div class="empty">Binance 계좌 정보를 불러오는 중…</div>'; return; }
+  $('#pfRecon').innerHTML = `<div class="pf-recon ${r.ok ? 'ok' : 'bad'}">${r.ok ? '● 일치 — 거래소 포지션과 봇 장부가 같습니다' : '● 포지션 불일치'} <span class="muted">${r.checkedAt ? fZone(r.checkedAt) : ''}</span></div>
+    ${r.rows.length ? `<table class="t compact"><thead><tr><th>종목</th><th>방향</th><th>거래소 수량</th><th>봇 장부 수량</th><th>차이</th><th>상태</th></tr></thead><tbody>
+    ${r.rows.map((x) => `<tr><td class="l">${x.symbol}</td><td class="l side-${x.side}">${SIDE[x.side]}</td><td>${x.exchangeQty}</td><td>${x.internalQty}</td><td class="${x.diff ? 'warn' : ''}">${x.diffText}</td><td class="${x.status === 'OK' ? 'up' : x.status === 'SYNCING' ? 'warn' : 'down'}"><b>${{ OK: '일치', SYNCING: '동기화 중', MISMATCH: '불일치' }[x.status] || x.status}</b></td></tr>`).join('')}</tbody></table>` : '<div class="empty">거래소와 장부 모두 포지션 없음</div>'}`;
 }
 
 function renderPositions() {
@@ -164,14 +166,14 @@ function renderPositions() {
   const k = P.sort.k;
   rows = rows.slice().sort((a, b) => { const va = a[k] ?? -Infinity, vb = b[k] ?? -Infinity; return (typeof va === 'string' ? va.localeCompare(vb) : va - vb) * P.sort.dir; });
   const f = (sym) => d._filters?.[sym];
-  const cols = [['assetClass', 'Class'], ['strategy', 'Strategy'], ['symbol', 'Symbol'], ['side', 'Side'], ['leverage', 'Lev'], ['entryPrice', 'Entry'], ['markPrice', 'Mark'], ['qty', 'Qty'], ['positionValue', 'Value'], ['margin', 'Margin'], ['unrealized', 'Unrealized'], ['pnlPct', 'PnL %'], ['stopPrice', 'Stop'], ['funding', 'Funding'], ['holdingMs', 'Holding']];
+  const cols = [['assetClass', '자산군'], ['strategy', '전략'], ['symbol', '종목'], ['side', '방향'], ['leverage', '레버리지'], ['entryPrice', '진입가'], ['markPrice', '현재가'], ['qty', '수량'], ['positionValue', '가치'], ['margin', '증거금'], ['unrealized', '평가손익'], ['pnlPct', '수익률'], ['stopPrice', '손절가'], ['funding', '펀딩비'], ['holdingMs', '보유기간']];
   const arrow = (c) => (c === k ? (P.sort.dir < 0 ? ' ▼' : ' ▲') : '');
   $('#pfPositions').innerHTML = rows.length ? `<table class="t"><thead><tr>${cols.map(([c, l]) => `<th data-k="${c}" class="sortable ${['assetClass', 'strategy', 'symbol', 'side'].includes(c) ? 'l' : ''}">${l}${arrow(c)}</th>`).join('')}</tr></thead><tbody>
-    ${rows.map((p) => `<tr class="${p.attributed ? '' : 'unattr'}" title="${esc(p.note || '')}"><td class="l">${p.assetClass === 'CRYPTO' ? 'CRYPTO' : 'TRADFI'}</td><td class="l"><b>${SHORT[p.strategy] || p.strategy}</b>${p.ctrlMultiplier != null && p.ctrlMultiplier !== 1 ? ` <span class="tag PENDING">×${p.ctrlMultiplier}</span>` : ''}</td><td class="l">${p.symbol}</td><td class="l side-${p.side}">${p.side}</td>
-      <td>${p.leverage ? p.leverage + 'x' : '—'}</td><td>${fPrice(p.entryPrice, f(p.symbol))}</td><td>${fPrice(p.markPrice, f(p.symbol))}</td><td>${p.qty}</td><td>${fNum(p.positionValue, 2)}</td><td>${fNum(p.margin, 2)}</td>
+    ${rows.map((p) => `<tr class="${p.attributed ? '' : 'unattr'}" title="${esc(p.note || '')}"><td class="l">${p.assetClass === 'CRYPTO' ? '코인' : 'QQQ'}</td><td class="l"><b>${SHORT[p.strategy] || p.strategy}</b>${p.ctrlMultiplier != null && p.ctrlMultiplier !== 1 ? ` <span class="tag PENDING">×${p.ctrlMultiplier}</span>` : ''}</td><td class="l">${p.symbol}</td><td class="l side-${p.side}">${SIDE[p.side]}</td>
+      <td>${p.leverage ? p.leverage + '배' : '—'}</td><td>${fPrice(p.entryPrice, f(p.symbol))}</td><td>${fPrice(p.markPrice, f(p.symbol))}</td><td>${p.qty}</td><td>${fNum(p.positionValue, 2)}</td><td>${fNum(p.margin, 2)}</td>
       <td class="${cls(p.unrealized)}">${fSigned(p.unrealized)}</td><td class="${cls(p.pnlPct)}">${p.pnlPct != null ? fPct(p.pnlPct) : '—'}</td>
-      <td class="down">${p.stopPrice ? fPrice(p.stopPrice, f(p.symbol)) : p.attributed ? 'OFF' : '—'}${p.exStop ? ` <span class="tag ${p.exStop === 'NEW' ? 'LONG' : 'PENDING'}">EX</span>` : ''}</td>
-      <td class="${cls(p.funding)}">${p.funding != null ? fNum(p.funding, 4) : '—'}</td><td>${p.holdingMs != null ? fDur(p.holdingMs) : '—'}</td></tr>`).join('')}</tbody></table>` : '<div class="empty">No positions</div>';
+      <td class="down">${p.stopPrice ? fPrice(p.stopPrice, f(p.symbol)) : p.attributed ? '없음' : '—'}${p.exStop ? ` <span class="tag ${p.exStop === 'NEW' ? 'LONG' : 'PENDING'}">거래소</span>` : ''}</td>
+      <td class="${cls(p.funding)}">${p.funding != null ? fNum(p.funding, 4) : '—'}</td><td>${p.holdingMs != null ? fDur(p.holdingMs) : '—'}</td></tr>`).join('')}</tbody></table>` : '<div class="empty">포지션 없음</div>';
 }
 
 function renderPnl() {
@@ -179,22 +181,22 @@ function renderPnl() {
   if (!d) return;
   const per = d.pnl[P.period];
   const g = per[P.group];
-  const label = (k) => (P.group === 'byStrategy' ? SHORT[k] || k : P.group === 'byClass' ? (k === 'CRYPTO' ? 'CRYPTO' : 'TRADFI') : k);
+  const label = (k) => (P.group === 'byStrategy' ? SHORT[k] || k : P.group === 'byClass' ? (k === 'CRYPTO' ? '코인' : 'QQQ') : k);
   const rows = Object.entries(g).sort((a, b) => b[1].net - a[1].net).map(([k, v]) => `<tr><td class="l"><b>${label(k)}</b></td><td>${v.trades}</td><td class="${cls(v.gross)}">${fSigned(v.gross)}</td><td class="down">${fNum(-v.fees, 4)}</td><td class="${cls(v.funding)}">${fNum(v.funding, 4)}</td><td class="${cls(v.realized)}">${fSigned(v.realized)}</td><td class="${cls(v.unrealized)}">${fSigned(v.unrealized)}</td><td class="${cls(v.net)}"><b>${fSigned(v.net)}</b></td></tr>`).join('');
   const t = per.total;
   const ex = d.exchangeIncome?.[P.period];
-  $('#pfPnl').innerHTML = `<table class="t compact"><thead><tr><th>${P.group === 'bySymbol' ? 'Symbol' : P.group === 'byStrategy' ? 'Strategy' : 'Asset Class'}</th><th>Trades</th><th>Gross</th><th>Fees</th><th>Funding</th><th>Realized (net)</th><th>Unrealized (open)</th><th>Net</th></tr></thead>
-    <tbody>${rows || '<tr><td colspan="8" class="l muted">No trades / positions</td></tr>'}</tbody>
-    <tfoot><tr><td>TOTAL ${P.period}</td><td>${t.trades}</td><td class="${cls(t.gross)}">${fSigned(t.gross)}</td><td class="down">${fNum(-t.fees, 4)}</td><td>${fNum(t.funding, 4)}</td><td class="${cls(t.realized)}">${fSigned(t.realized)}</td><td></td><td></td></tr>
-    ${ex ? `<tr><td class="l">BINANCE INCOME</td><td></td><td class="${cls(ex.realized)}">${fSigned(ex.realized)}</td><td class="down">${fNum(ex.commission, 4)}</td><td>${fNum(ex.funding, 4)}</td><td class="${cls(ex.net)}">${fSigned(ex.net)}</td><td colspan="2" class="l muted">exchange record (all trades incl. manual)</td></tr>` : ''}</tfoot></table>
-    <div class="muted" style="padding:4px 10px">Realized = trades closed in the period (net of entry+exit fees and funding). Unrealized = currently open positions.</div>`;
+  $('#pfPnl').innerHTML = `<table class="t compact"><thead><tr><th>${P.group === 'bySymbol' ? '종목' : P.group === 'byStrategy' ? '전략' : '자산군'}</th><th>거래수</th><th>매매손익</th><th>수수료</th><th>펀딩비</th><th>실현손익(순)</th><th>평가손익(보유 중)</th><th>합계</th></tr></thead>
+    <tbody>${rows || '<tr><td colspan="8" class="l muted">거래 / 포지션 없음</td></tr>'}</tbody>
+    <tfoot><tr><td>합계 (${LBL[P.period] || '전체'})</td><td>${t.trades}</td><td class="${cls(t.gross)}">${fSigned(t.gross)}</td><td class="down">${fNum(-t.fees, 4)}</td><td>${fNum(t.funding, 4)}</td><td class="${cls(t.realized)}">${fSigned(t.realized)}</td><td></td><td></td></tr>
+    ${ex ? `<tr><td class="l">Binance 정산 기록</td><td></td><td class="${cls(ex.realized)}">${fSigned(ex.realized)}</td><td class="down">${fNum(ex.commission, 4)}</td><td>${fNum(ex.funding, 4)}</td><td class="${cls(ex.net)}">${fSigned(ex.net)}</td><td colspan="2" class="l muted">거래소 기록 (수동 거래 포함)</td></tr>` : ''}</tfoot></table>
+    <div class="muted" style="padding:4px 10px">실현손익 = 기간 중 청산된 거래 (진입·청산 수수료와 펀딩 반영). 평가손익 = 현재 보유 중인 포지션.</div>`;
 }
 
 function renderCosts() {
   const c = P.data.costs;
   const row = (l, v, c2) => `<tr><td>${l}</td><td class="${c2 ?? cls(v)}">${fSigned(v)}</td></tr>`;
-  $('#pfCosts').innerHTML = `<table class="t kv pf-costs"><tbody>${row('Gross PnL (price move)', c.gross)}${row('Fees (entry + exit)', -c.fees, 'down')}${row('Funding (net received)', c.funding)}<tr class="grp"><td>NET PNL</td><td class="${cls(c.net)}"><b>${fSigned(c.net)}</b></td></tr></tbody></table>
-    <div class="muted" style="padding:6px 10px">All closed trades + open positions of the ${P.data.mode} ledger. Slippage is inside the fill prices.</div>`;
+  $('#pfCosts').innerHTML = `<table class="t kv pf-costs"><tbody>${row('매매손익 (가격 변동)', c.gross)}${row('수수료 (진입 + 청산)', -c.fees, 'down')}${row('펀딩비 (받은 금액 − 낸 금액)', c.funding)}<tr class="grp"><td>순손익</td><td class="${cls(c.net)}"><b>${fSigned(c.net)}</b></td></tr></tbody></table>
+    <div class="muted" style="padding:6px 10px">${P.data.mode === 'LIVE' ? '실전' : '모의투자'} 장부의 청산 거래 + 보유 포지션 기준. 슬리피지는 체결가에 포함.</div>`;
 }
 
 // ---------- equity curve
@@ -208,7 +210,7 @@ function initChart() {
     rightPriceScale: { borderColor: '#222933' }, leftPriceScale: { visible: false, borderColor: '#222933' },
     timeScale: { borderColor: '#222933', timeVisible: true, secondsVisible: false },
   });
-  P.series = P.chart.addSeries(LC.AreaSeries, { lineColor: '#f0b90b', topColor: 'rgba(240,185,11,.25)', bottomColor: 'rgba(240,185,11,0)', lineWidth: 2, title: 'Equity' });
+  P.series = P.chart.addSeries(LC.AreaSeries, { lineColor: '#f0b90b', topColor: 'rgba(240,185,11,.25)', bottomColor: 'rgba(240,185,11,0)', lineWidth: 2, title: '총 자산' });
 }
 
 async function loadCurve() {
@@ -232,5 +234,5 @@ async function loadCurve() {
   } else P.chart.applyOptions({ leftPriceScale: { visible: false } });
   P.chart.timeScale().fitContent();
   const dd = P.data?.drawdown;
-  $('#pfDd').innerHTML = `${r.points.length} samples (${P.range}) · Current DD <b class="${dd?.currentPct > 0 ? 'down' : ''}">${dd?.currentPct != null ? '−' + dd.currentPct.toFixed(2) + '%' : '—'}</b> · Max DD <b class="down">${dd?.maxPct != null ? '−' + dd.maxPct.toFixed(2) + '%' : '—'}</b> <span class="muted">from stored account equity, deposits/withdrawals excluded${P.overlay ? ' · left axis: cumulative strategy PnL' : ''}</span>`;
+  $('#pfDd').innerHTML = `${r.points.length}개 기록 (${LBL[P.range] || '전체'}) · 현재 하락 <b class="${dd?.currentPct > 0 ? 'down' : ''}">${dd?.currentPct != null ? '−' + dd.currentPct.toFixed(2) + '%' : '—'}</b> · 최대 하락 <b class="down">${dd?.maxPct != null ? '−' + dd.maxPct.toFixed(2) + '%' : '—'}</b> <span class="muted">저장된 계좌 자산 기준, 입출금 제외${P.overlay ? ' · 왼쪽 축: 전략별 누적 손익' : ''}</span>`;
 }

@@ -7,11 +7,11 @@ export const TRADFI_STRATEGIES = ['QQQ_EMA_TREND', 'QQQ_TSMOM', 'QQQ_SMA200', 'Q
 
 const longOnly = { supportsShort: false, resetAfterStop: true };
 export const TRADFI_META = {
-  QQQ_EMA_TREND: { label: 'QQQ EMA Trend', short: 'E', ...longOnly, exitRule: (p) => `EMA${p.fastEma} <= EMA${p.slowEma}` },
-  QQQ_TSMOM: { label: 'QQQ TSMOM', short: 'R', ...longOnly, exitRule: (p) => `${p.lookback}D Mom <= 0` },
-  QQQ_SMA200: { label: 'QQQ SMA200 Regime', short: 'S', ...longOnly, exitRule: (p) => `Close <= SMA${p.smaPeriod}` },
+  QQQ_EMA_TREND: { label: 'QQQ EMA Trend', short: 'E', ...longOnly, exitRule: (p) => `EMA${p.fastEma}가 EMA${p.slowEma} 아래로` },
+  QQQ_TSMOM: { label: 'QQQ TSMOM', short: 'R', ...longOnly, exitRule: (p) => `${p.lookback}세션 모멘텀 0 이하` },
+  QQQ_SMA200: { label: 'QQQ SMA200 Regime', short: 'S', ...longOnly, exitRule: (p) => `종가가 SMA${p.smaPeriod} 이하` },
   // breakout event (like crypto Turtle): no re-arm needed after a stop
-  QQQ_TURTLE_50_20: { label: 'QQQ Slow Turtle 50/20', short: 'W', supportsShort: false, resetAfterStop: false, exitRule: (p) => `${p.exitPeriod}D Low` },
+  QQQ_TURTLE_50_20: { label: 'QQQ Slow Turtle 50/20', short: 'W', supportsShort: false, resetAfterStop: false, exitRule: (p) => `${p.exitPeriod}세션 최저가 이탈` },
 };
 
 export function tradfiMinCandles(name, cfg) {
