@@ -16,15 +16,12 @@ const amounts = (long, short) => ({ PAPER: { long, short }, LIVE: { long, short 
 export const DEFAULT_CONFIG = {
   general: {
     mode: 'PAPER', // PAPER | LIVE (selected trading engine; bot RUNNING/STOPPED is separate)
-    leverage: 1, // crypto symbols
-    leverageTradfi: 1, // QQQUSDT (TradFi index perpetual)
     usCalendar: DEFAULT_US_CALENDAR, // NYSE holidays / early closes for QQQ signal sessions
     takerFeePct: 0.05,
     makerFeePct: 0.02,
     slippagePct: 0.05,
     includeFunding: true,
     paperInitialBalance: 10000,
-    liveBaseCapital: null, // null = captured from first successful LIVE account read
     stopsActiveWhenStopped: true, // Emergency stops keep protecting positions after STOP ALL BOTS
     dataStaleSec: 30,
     balanceBufferPct: 2, // extra margin headroom required in balance check
@@ -68,7 +65,7 @@ export const DEFAULT_CONFIG = {
       enabled: true,
       timeframe: '4h', // signal candles (4h | 1d); rules unchanged: close vs prior N-bar channel
       shortEnabled: true,
-      amounts: amounts(300, 150),
+      leverage: 1, amounts: amounts(300, 150),
       params: { entryPeriod: 20, exitPeriod: 10, smaFilter: 200 },
       stop: { mode: 'ATR_DYNAMIC', atrPeriod: 20, atrMult: 2.0, minPct: 8, maxPct: 18, fixedPct: 10 },
       takeProfit: { enabled: false, pct: 30 },
@@ -77,7 +74,7 @@ export const DEFAULT_CONFIG = {
       enabled: true,
       timeframe: '4h',
       shortEnabled: true,
-      amounts: amounts(250, 125),
+      leverage: 1, amounts: amounts(250, 125),
       params: { adxPeriod: 14, threshold: 25, smaFilter: 200 },
       stop: { mode: 'ATR_DYNAMIC', atrPeriod: 14, atrMult: 2.0, minPct: 6, maxPct: 15, fixedPct: 8 },
       takeProfit: { enabled: false, pct: 25 },
@@ -86,32 +83,32 @@ export const DEFAULT_CONFIG = {
       enabled: true,
       timeframe: '1d',
       shortEnabled: false,
-      amounts: amounts(250, 0),
+      leverage: 1, amounts: amounts(250, 0),
       params: { lookback: 30 },
       stop: { mode: 'ATR_DYNAMIC', atrPeriod: 20, atrMult: 3.0, minPct: 10, maxPct: 22, fixedPct: 15 },
       takeProfit: { enabled: false, pct: 40 },
     },
     // ---- TRADFI (QQQUSDT): LONG / CASH only, signals on US regular-session closes
     QQQ_EMA_TREND: {
-      enabled: true, shortEnabled: false, amounts: amounts(300, 0),
+      enabled: true, shortEnabled: false, leverage: 1, amounts: amounts(300, 0),
       params: { fastEma: 50, slowEma: 150, sma200Filter: false },
       stop: { mode: 'ATR_DYNAMIC', atrPeriod: 20, atrMult: 2.5, minPct: 5, maxPct: 12, fixedPct: 8 },
       takeProfit: { enabled: false, pct: 20 },
     },
     QQQ_TSMOM: {
-      enabled: true, shortEnabled: false, amounts: amounts(250, 0),
+      enabled: true, shortEnabled: false, leverage: 1, amounts: amounts(250, 0),
       params: { lookback: 126, sma200Filter: false },
       stop: { mode: 'ATR_DYNAMIC', atrPeriod: 20, atrMult: 2.5, minPct: 5, maxPct: 12, fixedPct: 8 },
       takeProfit: { enabled: false, pct: 20 },
     },
     QQQ_SMA200: {
-      enabled: false, shortEnabled: false, amounts: amounts(250, 0),
+      enabled: false, shortEnabled: false, leverage: 1, amounts: amounts(250, 0),
       params: { smaPeriod: 200 },
       stop: { mode: 'ATR_DYNAMIC', atrPeriod: 20, atrMult: 2.5, minPct: 5, maxPct: 12, fixedPct: 8 },
       takeProfit: { enabled: false, pct: 20 },
     },
     QQQ_TURTLE_50_20: {
-      enabled: false, shortEnabled: false, amounts: amounts(250, 0),
+      enabled: false, shortEnabled: false, leverage: 1, amounts: amounts(250, 0),
       params: { entryPeriod: 50, exitPeriod: 20 },
       stop: { mode: 'ATR_DYNAMIC', atrPeriod: 20, atrMult: 2.5, minPct: 5, maxPct: 12, fixedPct: 8 },
       takeProfit: { enabled: false, pct: 20 },
@@ -164,6 +161,8 @@ const F = {
 export class Store {
   constructor() {
     this.config = deepMerge(DEFAULT_CONFIG, readJson(F.config, {}));
+    // removed settings: leverage is per strategy now, LIVE base capital = current account equity
+    for (const k of ['leverage', 'leverageTradfi', 'liveBaseCapital']) delete this.config.general[k];
     const st = readJson(F.state, {});
     this.state = {
       runState: 'STOPPED', // always start STOPPED after restart (safety)

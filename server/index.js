@@ -133,11 +133,12 @@ app.post('/api/config/strategy/:name', (req, res) => {
   if (engine.mode === 'LIVE' && engine.runState === 'RUNNING' && !confirmed(req, 'APPLY')) return ok(res, { ok: false, msg: 'LIVE running: confirmation required', needConfirm: true });
   try {
     const next = validateStrategySettings(name, req.body.settings, cur);
+    if (next.leverage !== (cur.leverage ?? 1) && engine.runState === 'RUNNING') throw new Error('Stop bots before changing leverage');
     const prevCfg = structuredClone(cur);
     store.config.strategies[name] = next;
     controller.onStrategyConfigChanged(name, prevCfg, next);
     store.saveConfig();
-    log.info(`${name} settings saved (${engine.mode}${engine.runState === 'RUNNING' ? ', applies from next evaluation; open positions keep their stops' : ''})`, 'CONFIG_SAVED', { amounts: next.amounts, params: next.params, stop: next.stop });
+    log.info(`${name} settings saved (${engine.mode}${engine.runState === 'RUNNING' ? ', applies from next evaluation; open positions keep their stops' : ''})`, 'CONFIG_SAVED', { leverage: next.leverage, amounts: next.amounts, params: next.params, stop: next.stop });
     engine.evaluateAll('config saved');
     ok(res);
   } catch (e) {
@@ -149,19 +150,13 @@ app.post('/api/config/general', (req, res) => {
   try {
     const b = req.body.settings;
     const g = store.config.general;
-    const lev = num(b.leverage, { min: 1, max: 20, int: true });
-    const levT = num(b.leverageTradfi ?? g.leverageTradfi ?? 1, { min: 1, max: 10, int: true });
-    if ((lev !== g.leverage || levT !== g.leverageTradfi) && engine.runState === 'RUNNING') throw new Error('Stop bots before changing leverage');
     const next = {
       ...g,
-      leverage: lev,
-      leverageTradfi: levT,
       takerFeePct: num(b.takerFeePct, { min: 0, max: 1 }),
       makerFeePct: num(b.makerFeePct, { min: 0, max: 1 }),
       slippagePct: num(b.slippagePct, { min: 0, max: 5 }),
       includeFunding: !!b.includeFunding,
       paperInitialBalance: num(b.paperInitialBalance, { min: 1, max: 1e9 }),
-      liveBaseCapital: b.liveBaseCapital === '' || b.liveBaseCapital == null ? null : num(b.liveBaseCapital, { min: 1, max: 1e10 }),
       stopsActiveWhenStopped: !!b.stopsActiveWhenStopped,
       dataStaleSec: num(b.dataStaleSec, { min: 5, max: 600, int: true }),
       balanceBufferPct: num(b.balanceBufferPct, { min: 0, max: 50 }),
@@ -170,7 +165,7 @@ app.post('/api/config/general', (req, res) => {
     };
     store.config.general = next;
     store.saveConfig();
-    log.info('General settings saved', 'CONFIG_SAVED', { leverage: next.leverage, leverageTradfi: next.leverageTradfi, fee: next.takerFeePct, slip: next.slippagePct });
+    log.info('General settings saved', 'CONFIG_SAVED', { fee: next.takerFeePct, slip: next.slippagePct });
     ok(res);
   } catch (e) {
     ok(res, { ok: false, msg: e.message });

@@ -14,6 +14,7 @@ const CHIP = { TURTLE: '터틀', ADX: 'ADX', TSMOM: 'TSMOM', QQQ_EMA_TREND: 'EMA
 const stratsOf = (sym) => S.meta.strategiesBySymbol[sym] || [];
 const classOf = (sym) => S.meta.symbolMeta[sym]?.asset_class || 'CRYPTO';
 const isLongOnly = (st) => !S.meta.supportsShort[st];
+const levSummary = () => Object.entries(S.config.strategies).filter(([, c]) => c.enabled).map(([n, c]) => `${n} ${c.leverage ?? 1}배`).join(' · ');
 const S = {
   snap: null, config: null, meta: null, sel: localGet('sel', 'BTCUSDT'), tab: 'positions',
   logs: [], logFilter: 'ALL', errCount: 0, view: localGet('view', 'terminal'), portfolio: null,
@@ -100,7 +101,7 @@ function bindUi() {
     let body = {};
     if (live) {
       const w = await confirmDialog({ title: '실전 자동매매 시작', danger: true, word: 'LIVE',
-        html: `<p>실계좌(<b>${S.snap.conn.testnet ? '테스트넷' : '실제 계좌'}</b>)에서 자동매매를 시작합니다.</p><p>레버리지 <b>${S.config.general.leverage}배</b>, 전략별 실전 주문금액이 적용됩니다.</p>` });
+        html: `<p>실계좌(<b>${S.snap.conn.testnet ? '테스트넷' : '실제 계좌'}</b>)에서 자동매매를 시작합니다.</p><p>전략별 레버리지(${levSummary()})와 실전 주문금액이 적용됩니다.</p>` });
       if (!w) return;
       body = { confirm: 'LIVE' };
     }
@@ -446,7 +447,7 @@ function renderSummary(s) {
     ['누적 손익', `<span class="${cls(a.totalPnl)}">${fSigned(a.totalPnl)}</span>`],
     ['총 / 코인 / QQQ 규모', `${fNum(a.grossExp, 0)} / ${fNum(a.byClass?.CRYPTO?.gross, 0)} / ${fNum(a.byClass?.TRADFI_INDEX?.gross, 0)}`],
     ['원금', a.baseCapital ? fUsd(a.baseCapital) : '—'],
-    ['레버리지 코인 / QQQ', `${S.config.general.leverage}배 / ${S.config.general.leverageTradfi ?? 1}배${s.mode === 'LIVE' && s.conn.hedgeMode != null ? ` · ${s.conn.hedgeMode ? '양방향(Hedge)' : '<span class="down">단방향</span>'}` : ''}`],
+    ['레버리지', `${levSummary()}${s.mode === 'LIVE' && s.conn.hedgeMode != null ? ` · ${s.conn.hedgeMode ? '양방향(Hedge)' : '<span class="down">단방향</span>'}` : ''}`],
     ['수수료 / 슬리피지', `${S.config.general.takerFeePct}% / ${S.config.general.slippagePct}%`],
   ].map(([k, v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join('');
 }

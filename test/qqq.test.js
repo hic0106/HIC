@@ -223,12 +223,20 @@ test('QQQ ATR emergency stop range 5–12%', async () => {
   assert.ok(Math.abs(pos.stopPct - 12) < 1e-9);
 });
 
-test('QQQ leverage is separate and defaults to 1x', () => {
-  const { engine } = setup();
-  assert.equal(engine.leverageFor('QQQUSDT'), 1);
-  engine.store.config.general.leverage = 3;
-  assert.equal(engine.leverageFor('BTCUSDT'), 3);
-  assert.equal(engine.leverageFor('QQQUSDT'), 1);
+test('leverage is per strategy: notional = amount × leverage, symbol leverage = max of enabled strategies', async () => {
+  const { engine, store } = setup(fakeMarket(Array.from({ length: 220 }, () => 600)));
+  assert.equal(engine.leverageFor('QQQ_EMA_TREND'), 1);
+  store.config.strategies.QQQ_EMA_TREND.leverage = 3;
+  store.config.strategies.TURTLE.leverage = 5;
+  assert.equal(engine.leverageFor('QQQ_TSMOM'), 1);
+  assert.equal(engine.symbolLeverage('QQQUSDT'), 3);
+  assert.equal(engine.symbolLeverage('BTCUSDT'), 5);
+  store.config.strategies.TURTLE.enabled = false;
+  assert.equal(engine.symbolLeverage('BTCUSDT'), 1);
+  await engine.openPosition('QQQ_EMA_TREND', 'QQQUSDT', 'LONG', { atr: 5 });
+  const pos = engine.slot('QQQ_EMA_TREND', 'QQQUSDT').position;
+  assert.equal(pos.qty, 1.5); // 300 USDT margin × 3 / 600
+  assert.equal(pos.leverage, 3);
 });
 
 test('controller multiplier applies to QQQ strategies (order multiplier only)', async () => {
@@ -245,7 +253,7 @@ test('controller multiplier applies to QQQ strategies (order multiplier only)', 
   assert.equal(pos.orderAmount, 375);
   assert.equal(store.config.strategies.QQQ_EMA_TREND.params.fastEma, 50);
   assert.equal(store.config.strategies.QQQ_EMA_TREND.params.slowEma, 150);
-  assert.equal(engine.leverageFor('QQQUSDT'), 1);
+  assert.equal(engine.leverageFor('QQQ_EMA_TREND'), 1);
   c.evaluate('test');
   const perf = c.classPerformance();
   assert.ok(perf.CRYPTO && perf.TRADFI_INDEX, 'crypto / tradfi evaluated separately');

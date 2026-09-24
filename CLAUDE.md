@@ -21,7 +21,7 @@
 
 - API 키는 `data/secrets.json`(gitignore, 0600)에만 저장. UI로 반환하거나 커밋 금지. Claude API 키도 동일(`anthropicApiKey`). `ANTHROPIC_API_KEY` 환경변수도 지원하지만 Claude Code 로그인과 충돌하므로 설정 권장하지 않음.
 - Binance 키 권한: Enable Reading + Enable Futures만, IP 제한, 출금 금지.
-- 레버리지 자동 증가 금지. Controller/AI는 주문 금액(amounts)·enabled 플래그를 바꾸지 않고 주문도 넣지 않는다.
+- 레버리지 자동 증가 금지. 레버리지는 전략별(`strategies.<name>.leverage`), 주문금액 = 증거금, 명목 = 금액 × 레버리지, Binance 종목 레버리지 = 켜진 전략 중 최대(`engine.symbolLeverage`). 백테스트는 1x. Controller/AI는 주문 금액(amounts)·enabled 플래그를 바꾸지 않고 주문도 넣지 않는다.
 - AI 변경은 사용자가 [적용]을 눌러야만 반영. LIVE 실행 중이면 `APPLY` 입력 확인 필요.
 - LIVE 동작(시작, 전체 청산 등)은 입력 확인 필요.
 - 커밋 메시지·코드에 모델 식별자 넣지 않기.
@@ -68,6 +68,9 @@ config.json, state.json, secrets.json, portfolio-history.json, backtest-last.jso
 - 업그레이드 전 1D로 열린 Turtle/ADX 포지션도 이제 4H 규칙으로 청산 평가됨. 포지션별 원래 캔들 유지 기능은 사용자가 원하면 추가.
 - AI 생성 전략은 백테스트/저장만 가능, 실전 실행 기능 없음.
 - 시스템 로그 일부는 영어.
+- QQQUSDT TradFi-Perps 약관은 2026-09-24 API(`POST /fapi/v1/stock/contract`)로 서명 완료.
+- 실계좌 검증(2026-09-24): `/fapi/v1/income`, `/fapi/v1/userTrades`만 -2015 거부(다른 서명 API는 정상). 원인 미확인 — 키 재발급 후 재확인 필요. 실패 시 수수료는 설정값으로 대체됨.
+- LIVE 원금(총 수익률 분모) = 현재 계좌 자산(실시간). `liveBaseCapital` 설정 삭제.
 - 업비트 키는 미지원(현물 전용). 업비트 현물 모드는 제안만 한 상태.
 - PC가 꺼지면 Binance에 등록된 Stop 외 기능은 동작하지 않음.
 - 클라우드 개발 환경에서는 Binance/업비트 API가 차단되어 가짜 서버로만 검증함. 실제 API 검증은 로컬에서 필요.

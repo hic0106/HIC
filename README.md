@@ -60,12 +60,13 @@ Testnet을 체크하면 주문이 `demo-fapi.binance.com`으로 전송됩니다(
 
 ## 운영 규칙
 
-- 주문금액은 **고정 USDT(포지션 명목금액)**. 전략별 Long/Short 금액, PAPER/LIVE 금액을 따로 저장합니다. 설정은 `Save`를 눌러야 적용되고 `data/config.json`에 저장됩니다.
+- 주문금액은 **고정 USDT(증거금)**. 포지션 명목금액 = 주문금액 × 전략 레버리지. 전략별 Long/Short 금액, PAPER/LIVE 금액을 따로 저장합니다. 설정은 `Save`를 눌러야 적용되고 `data/config.json`에 저장됩니다.
 - 수량은 Binance `stepSize`로 **내림** 처리합니다(설정 금액을 초과하지 않음). `minQty`, `MIN_NOTIONAL` 미달이면 주문을 Skip합니다.
-- 잔고 < (주문금액 / 레버리지) × (1 + Balance Buffer) + 예상 수수료 이면 금액을 줄이지 않고 **Skip + 로그**(INSUFFICIENT_BALANCE).
+- 잔고 < (명목금액 / 종목 레버리지) × (1 + Balance Buffer) + 예상 수수료 이면 금액을 줄이지 않고 **Skip + 로그**(INSUFFICIENT_BALANCE).
 - Strategy + Symbol 조합당 포지션 1개. 보유 중 같은 방향 신호는 무시, 다른 전략의 같은 코인 보유는 허용.
 - ADX / TSMOM은 Stop·수동 청산 후 조건이 한 번 false로 돌아온 뒤에만 재진입합니다(Stop 직후 즉시 재진입 방지). Turtle은 새 돌파 종가가 나오면 재진입합니다.
-- 기본 레버리지 1x. 봇 정지 상태에서만 변경 가능하며, 프로그램이 임의로 올리지 않습니다.
+- 레버리지는 전략별 설정(기본 1x, 코인 최대 20x·QQQ 최대 10x). Binance 레버리지는 종목 단위라 같은 종목의 켜진 전략 중 가장 높은 값으로 설정합니다. 봇 정지 상태에서만 변경 가능하며, 프로그램·Controller·AI가 임의로 올리지 않습니다.
+- 실전 총 수익률의 원금은 현재 계좌 자산(실시간)입니다.
 - PnL에 수수료(LIVE는 실제 체결 수수료 조회), Funding Fee(마크가격·펀딩비로 포지션별 계산), Slippage(PAPER 체결가)를 반영합니다.
 
 ### 주문 전 확인 항목
@@ -106,7 +107,7 @@ Bot Running, Strategy Enabled, Short Enabled, 모드, 거래소 연결, 데이�
 | QQQ_TURTLE_50_20 | OFF | 종가 > 이전 50세션 고가 | 종가 < 이전 20세션 저가 |
 
 - EMA / TSMOM에는 선택 사항으로 SMA200 진입 필터(기본 OFF)가 있습니다.
-- Emergency Stop 기본: ATR(20) × 2.5, 5~12%. 고정 Take Profit 기본 OFF. 레버리지는 Crypto와 별도(`Leverage TradFi`, 기본 1x)입니다.
+- Emergency Stop 기본: ATR(20) × 2.5, 5~12%. 고정 Take Profit 기본 OFF. 레버리지는 전략별(기본 1x)입니다.
 - **신호 시간**: QQQ 전략은 UTC 일봉이 아니라 **미국 정규장(America/New_York 09:30–16:00, 조기폐장 13:00) 종가 기준 세션 일봉**으로 계산합니다. 세션 일봉은 Binance QQQUSDT 30분봉 중 정규장 시간만 모아 만들고, 정규장 종료 후 한 번만 평가합니다. 장외 가격 변동은 신호에 쓰지 않지만 Stop은 24시간 동작합니다. NYSE 휴장일·조기폐장은 `config.json`의 `general.usCalendar`에 있습니다(2026–2027 수록, 이후 연도는 추가 필요).
 - **데이터 한계**: Binance QQQUSDT 자체 이력은 2026-04 이후뿐이라(`nativeHistory: LIMITED`) EMA150(152세션), TSMOM 126(128세션), SMA200(202세션)은 세션이 충분히 쌓일 때까지 "insufficient session history"로 대기합니다. ETF 과거 데이터를 섞지 않습니다. `SignalDataProvider` / `ExecutionDataProvider` 구조로 향후 QQQ ETF 세션 데이터로 교체할 수 있습니다.
 - Funding은 Crypto와 같은 엔진으로 포지션별 기록합니다(Trading PnL / Fee / Funding / Net PnL).
@@ -188,7 +189,7 @@ Emergency Stop / Take Profit은 스케줄러와 분리되어 **모든 가격 틱
 
 - **저장된 현재 설정 그대로**: 전략 파라미터, Timeframe(Turtle·ADX 4H, TSMOM 1D, QQQ 미국 정규장), Stop(ATR/고정, min/max), Take Profit, Short ON/OFF, 수수료·슬리피지, 펀딩(과거 funding rate 적용).
 - 전략 코드는 실제 엔진과 같은 함수를 씁니다. 신호는 마감 캔들, 체결은 다음 캔들 시가(± 슬리피지), Stop은 진입 시 확정되어 캔들 고가/저가로 검사(갭은 시가 체결), Stop 후 재진입 규칙 동일. 지표 계산 구간도 실시간과 같은 길이(4H 1000봉, 1D 500봉).
-- 자금: 전략마다 별도 계좌(기본 ₩1,000,000). 종목 슬롯마다 진입 시점 계좌 평가액 / 종목 수(Compound) 또는 원금 / 종목 수(고정). 레버리지 1x.
+- 자금: 전략마다 별도 계좌(기본 ₩1,000,000). 종목 슬롯마다 진입 시점 계좌 평가액 / 종목 수(Compound) 또는 원금 / 종목 수(고정). 레버리지는 적용하지 않습니다(1x, 청산 미모델링).
 - 결과: 전략별 최종 금액·수익률·CAGR·MDD·거래수·승률·Profit Factor·Sharpe·수수료·펀딩·Buy&Hold 비교, 전체 합산, 자산 곡선, 캔들 위 진입/청산 표시, 거래 목록(클릭 → 차트 이동).
 - 수익률은 USDT 가격 기준입니다. 원화 금액은 원금에 그 수익률을 적용한 값이며 환율 변동은 반영하지 않습니다.
 - QQQUSDT는 2026-04-06 상장이라 EMA150·TSMOM126·SMA200은 지표 준비 기간이 부족해 1년 백테스트가 불가능합니다(화면 Notes에 표시). Controller 배율은 적용하지 않습니다(1.00x 기준).

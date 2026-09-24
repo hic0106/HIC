@@ -15,6 +15,7 @@ export function validateStrategySettings(name, b, cur) {
     enabled: !!b.enabled,
     ...(STRATEGY_CLASS[name] === 'CRYPTO' ? { timeframe: CRYPTO_TIMEFRAME_CHOICES.includes(b.timeframe) ? b.timeframe : (cur.timeframe || '1d') } : {}),
     shortEnabled: STRATEGY_META[name].supportsShort ? !!b.shortEnabled : false,
+    leverage: num(b.leverage ?? cur.leverage ?? 1, { min: 1, max: STRATEGY_CLASS[name] === 'CRYPTO' ? 20 : 10, int: true }),
     amounts: {
       PAPER: { long: amt(b.amounts.PAPER.long), short: amt(b.amounts.PAPER.short ?? 0) },
       LIVE: { long: amt(b.amounts.LIVE.long), short: amt(b.amounts.LIVE.short ?? 0) },

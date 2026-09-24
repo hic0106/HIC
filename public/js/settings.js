@@ -74,12 +74,14 @@ function stratCol(name, c, mode, supportsShort) {
   const act = (m) => (m === mode ? 'act' : '');
   return `<div class="set-col" data-name="${name}">
     <div class="set-h"><span><b>${name}</b><small>${LABEL[name]}</small></span><span>${sw('enabled', c.enabled, ['켜짐', '꺼짐'])}</span></div>
-    <div class="set-sec">1회 주문금액 (USDT, 고정)</div>
+    <div class="set-sec">1회 주문금액 (USDT, 증거금)</div>
     <div class="fr amt"><span></span><span class="hd ${act('PAPER')}">모의${mode === 'PAPER' ? ' ●' : ''}</span><span class="hd ${act('LIVE')}">실전${mode === 'LIVE' ? ' ●' : ''}</span></div>
     <div class="fr amt"><label>롱 주문금액</label>${numIn('PAPER.long', a.PAPER.long, 1, `min="0" class="${act('PAPER')}"`)}${numIn('LIVE.long', a.LIVE.long, 1, `min="0" class="${act('LIVE')}"`)}</div>
     ${supportsShort ? `<div class="fr"><label>숏 사용</label><span>${sw('shortEnabled', c.shortEnabled)}</span></div>
     <div class="fr amt" data-dep="shortEnabled"><label>숏 주문금액</label>${numIn('PAPER.short', a.PAPER.short, 1, `min="0" class="${act('PAPER')}"`)}${numIn('LIVE.short', a.LIVE.short, 1, `min="0" class="${act('LIVE')}"`)}</div>`
       : '<div class="fr"><label>숏</label><span class="muted" style="text-align:right">없음 (롱 / 현금 전략)</span></div>'}
+    <div class="fr"><label>레버리지 (배)</label>${numIn('leverage', c.leverage ?? 1, 1, `min="1" max="${c.timeframe ? 20 : 10}"`)}</div>
+    <div class="note">포지션 규모 = 주문금액 × 레버리지. 같은 종목의 거래소 레버리지는 켜진 전략 중 가장 높은 값으로 설정. 변경은 봇 정지 상태에서만 가능.</div>
     ${c.timeframe ? `<div class="set-sec">신호 캔들</div>
     <div class="fr"><label>캔들 (마감 기준)</label><select name="timeframe">${['4h', '1d'].map((t) => `<option value="${t}" ${t === c.timeframe ? 'selected' : ''}>${t === '4h' ? '4시간' : '1일'}</option>`).join('')}</select></div>` : ''}
     <div class="set-sec">진입 / 청산 조건</div>
@@ -102,10 +104,6 @@ function stratCol(name, c, mode, supportsShort) {
 function generalCol(g) {
   return `<div class="set-col" data-name="GENERAL">
     <div class="set-h"><span><b>공통 설정</b><small>주문 · 비용 · 안전</small></span></div>
-    <div class="set-sec">선물 주문</div>
-    <div class="fr"><label>레버리지 코인 (배)</label>${numIn('leverage', g.leverage, 1, 'min="1" max="20"')}</div>
-    <div class="fr"><label>레버리지 QQQ (배)</label>${numIn('leverageTradfi', g.leverageTradfi ?? 1, 1, 'min="1" max="10"')}</div>
-    <div class="note">기본 1배. 주문금액 = 포지션 전체 금액. 레버리지는 증거금만 줄이며 자동으로 올리지 않음. 변경은 봇 정지 상태에서만 가능.</div>
     <div class="set-sec">비용 (손익에 반영)</div>
     <div class="fr"><label>시장가 수수료 %</label>${numIn('takerFeePct', g.takerFeePct, 0.001, 'min="0"')}</div>
     <div class="fr"><label>지정가 수수료 %</label>${numIn('makerFeePct', g.makerFeePct, 0.001, 'min="0"')}</div>
@@ -113,8 +111,7 @@ function generalCol(g) {
     <div class="fr"><label>펀딩비 반영</label><span>${sw('includeFunding', g.includeFunding)}</span></div>
     <div class="set-sec">원금</div>
     <div class="fr"><label>모의투자 시작 잔고</label>${numIn('paperInitialBalance', g.paperInitialBalance, 100, 'min="1"')}</div>
-    <div class="fr"><label>실전 원금</label>${numIn('liveBaseCapital', g.liveBaseCapital ?? '', 1, 'min="1" placeholder="자동"')}</div>
-    <div class="note">총 수익률 = 누적 손익 / 원금. 실전 원금이 비어 있으면 처음 연결할 때 계좌 자산으로 자동 설정.</div>
+    <div class="note">총 수익률 = 누적 손익 / 원금. 실전 원금은 현재 계좌 자산(실시간).</div>
     <div class="set-sec">안전 장치</div>
     <div class="fr"><label>거래소 손절주문 (실전)</label><span>${sw('exchangeStops', g.exchangeStops)}</span></div>
     <div class="fr" data-dep="exchangeStops"><label>손절 기준 가격</label><select name="stopWorkingType">${['CONTRACT_PRICE', 'MARK_PRICE'].map((m) => `<option value="${m}" ${m === g.stopWorkingType ? 'selected' : ''}>${m === 'CONTRACT_PRICE' ? '최근 체결가' : '마크 가격'}</option>`).join('')}</select></div>
@@ -148,7 +145,7 @@ function readStrategy(col) {
   const params = {};
   $$('[name^="p."]', col).forEach((i) => { params[i.name.slice(2)] = i.type === 'checkbox' ? i.checked : i.value; });
   return {
-    enabled: chk('enabled'), shortEnabled: chk('shortEnabled'), timeframe: val('timeframe'),
+    enabled: chk('enabled'), shortEnabled: chk('shortEnabled'), timeframe: val('timeframe'), leverage: val('leverage'),
     amounts: { PAPER: { long: val('PAPER.long'), short: val('PAPER.short') ?? 0 }, LIVE: { long: val('LIVE.long'), short: val('LIVE.short') ?? 0 } },
     params,
     stop: { mode: val('stop.mode'), atrPeriod: val('stop.atrPeriod'), atrMult: val('stop.atrMult'), minPct: val('stop.minPct'), maxPct: val('stop.maxPct'), fixedPct: val('stop.fixedPct') },

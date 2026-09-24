@@ -67,10 +67,16 @@ export class Engine {
     return ms.slots[k];
   }
 
-  // Leverage is set by the user per asset class (default 1x). Nothing raises it automatically.
-  leverageFor(symbol) {
-    const g = this.cfg.general;
-    return Number(assetClassOf(symbol) === 'CRYPTO' ? g.leverage : (g.leverageTradfi ?? 1));
+  // Leverage is set by the user per strategy (default 1x). Nothing raises it automatically.
+  // Order amount = margin; position notional = amount × strategy leverage.
+  leverageFor(strategy) {
+    return Number(this.cfg.strategies[strategy]?.leverage ?? 1);
+  }
+
+  // Binance leverage is per symbol (shared by every strategy on it): use the highest enabled strategy leverage.
+  symbolLeverage(symbol) {
+    const levs = strategiesForSymbol(symbol).filter((st) => this.cfg.strategies[st]?.enabled).map((st) => this.leverageFor(st));
+    return Math.max(1, ...levs);
   }
 
   symbolAvailable(sym) { return !!this.md.filters[sym] && !this.md.s[sym]?.unavailable; }
@@ -177,11 +183,6 @@ export class Engine {
       this.live.status = 'CONNECTED';
       this.live.error = null;
       this.live.lastCheck = Date.now();
-      if (this.cfg.general.liveBaseCapital == null) {
-        this.cfg.general.liveBaseCapital = round(this.live.account.equity, 2);
-        this.store.saveConfig();
-        this.log.info(`LIVE base capital captured: ${this.cfg.general.liveBaseCapital} USDT`);
-      }
     } catch (e) {
       this.live.status = 'ERROR';
       this.live.error = e.message;
@@ -196,7 +197,7 @@ export class Engine {
     if (forStart) {
       for (const sym of SYMBOLS) {
         if (!this.symbolAvailable(sym)) continue;
-        const r = await this.ensureLeverage(sym, this.leverageFor(sym));
+        const r = await this.ensureLeverage(sym, this.symbolLeverage(sym));
         if (!r.ok) return r;
       }
     }
@@ -398,24 +399,25 @@ export class Engine {
     const ctrl = this.controllerSizing(strategy, side, baseAmount);
     if (ctrl.multiplier === 0) return fail('CONTROLLER_PAUSED', `${strategy} ${symbol} ${side}: controller status ${ctrl.status} (base ${baseAmount} × 0) — entry skipped`);
     const amount = ctrl.amount;
-    const qty = floorToStep(amount / price, f.stepSize);
+    const lev = this.leverageFor(strategy);
+    const qty = floorToStep((amount * lev) / price, f.stepSize);
     if (qty < f.minQty || qty <= 0) return fail('BELOW_MIN_QTY', `${symbol} qty ${qty} < minQty ${f.minQty} (amount ${amount} USDT)`);
     if (qty > f.maxQty) return fail('ABOVE_MAX_QTY', `${symbol} qty ${qty} > maxQty ${f.maxQty}`);
     const notional = qty * price;
     if (notional < f.minNotional) return fail('BELOW_MIN_NOTIONAL', `${symbol} notional ${notional.toFixed(2)} < min ${f.minNotional} USDT`);
 
-    const lev = this.leverageFor(symbol);
+    const symLev = this.mode === 'LIVE' ? this.symbolLeverage(symbol) : lev;
     let available;
     if (this.mode === 'LIVE') {
       try { available = (await this.refreshLiveAccount()).available; } catch (e) { return fail('EXCHANGE_DISCONNECTED', `account read failed: ${e.message}`); }
-      if (this.live.leverage[symbol] !== lev) {
-        const r = await this.ensureLeverage(symbol, lev);
+      if (this.live.leverage[symbol] !== symLev) {
+        const r = await this.ensureLeverage(symbol, symLev);
         if (!r.ok) return fail('LEVERAGE_MISMATCH', r.msg);
       }
     } else {
       available = this.paperAccount().available;
     }
-    const required = (notional / lev) * (1 + g.balanceBufferPct / 100) + notional * (g.takerFeePct / 100);
+    const required = (notional / symLev) * (1 + g.balanceBufferPct / 100) + notional * (g.takerFeePct / 100);
     if (available < required) return fail('INSUFFICIENT_BALANCE', `${strategy} ${symbol} ${side}: available ${available.toFixed(2)} < required ${required.toFixed(2)} USDT (order ${amount} USDT @${lev}x) — order skipped`);
     return { ok: true, price, qty, notional, amount, baseAmount, ctrl, filters: f, leverage: lev, available };
   }
@@ -589,7 +591,7 @@ export class Engine {
         strategy: slot.strategy, symbol: slot.symbol, side, entryPrice: fill.avgPrice, qty: fill.executedQty,
         orderAmount: pend.amount, baseAmount: pend.baseAmount ?? pend.amount, ctrlMultiplier: pend.ctrlMultiplier ?? 1, ctrlStatus: pend.ctrlStatus ?? 'OFF', entryNotional: fill.avgPrice * fill.executedQty, entryFee: fill.fee, funding: 0,
         entryTime: Date.now(), stopPrice, stopPct: distPct, stopMode: scfg.stop.mode, tpPrice, atrAtEntry: pend.atr,
-        leverage: this.leverageFor(slot.symbol), clientOrderId: order.clientOrderId,
+        leverage: this.leverageFor(slot.strategy), clientOrderId: order.clientOrderId,
       };
       slot.status = side;
       slot.lastSignal = `${side} ENTRY`;
@@ -939,7 +941,7 @@ export class Engine {
     else acct = this.live.account ? { ...this.live.account } : { equity: null, available: null, wallet: null, unrealized: null };
     const openNet = pos.reduce((a, p) => a + p.pnl, 0);
     const totalPnl = (ms.realizedTotal || 0) + openNet;
-    const base = mode === 'PAPER' ? (ms.baseCapital ?? this.cfg.general.paperInitialBalance) : this.cfg.general.liveBaseCapital;
+    const base = mode === 'PAPER' ? (ms.baseCapital ?? this.cfg.general.paperInitialBalance) : (this.live.account?.equity ?? null); // LIVE: current account equity
     const day = utcDay();
     if (!ms.daySnap || ms.daySnap.day !== day) { ms.daySnap = { day, totalPnl }; this.store.saveState(); }
     let longExp = 0, shortExp = 0;
