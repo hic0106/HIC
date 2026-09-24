@@ -6,6 +6,7 @@ import { confirmDialog, openApiModal } from './modals.js';
 import { mountController, unmountController, controllerHeaderHtml, statusTag } from './controller.js';
 import { renderScheduler, setSignals, addSignal, scheduleLine } from './scheduler.js';
 import { mountPortfolio, update as updatePortfolio } from './portfolio.js';
+import { mountBacktest } from './backtest.js';
 
 const SHORT = { TURTLE: 'TURTLE', ADX: 'ADX', TSMOM: 'TSMOM', QQQ_EMA_TREND: 'QQQ EMA TREND', QQQ_TSMOM: 'QQQ TSMOM', QQQ_SMA200: 'QQQ SMA200', QQQ_TURTLE_50_20: 'QQQ TURTLE 50/20' };
 const CHIP = { TURTLE: 'TURT', ADX: 'ADX', TSMOM: 'TSMOM', QQQ_EMA_TREND: 'EMA', QQQ_TSMOM: 'TSM', QQQ_SMA200: 'SMA', QQQ_TURTLE_50_20: 'T50' };
@@ -53,10 +54,12 @@ function connectWs() {
 
 // ---------------- UI bindings
 function setView(v) {
-  S.view = v === 'portfolio' ? 'portfolio' : 'terminal';
+  S.view = ['portfolio', 'backtest'].includes(v) ? v : 'terminal';
   localSet('view', S.view);
-  document.body.classList.toggle('view-portfolio', S.view === 'portfolio');
+  document.body.classList.toggle('view-portfolio', S.view !== 'terminal');
   $('#portfolio').classList.toggle('hidden', S.view !== 'portfolio');
+  $('#backtest').classList.toggle('hidden', S.view !== 'backtest');
+  if (S.view === 'backtest') mountBacktest($('#backtest'));
   $$('#viewSwitch button').forEach((b) => b.classList.toggle('on', b.dataset.view === S.view));
   if (S.view === 'portfolio') { mountPortfolio($('#portfolio'), S.meta); if (S.portfolio) updatePortfolio(S.portfolio); } else chart.resize();
 }

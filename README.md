@@ -182,6 +182,17 @@ Emergency Stop / Take Profit은 스케줄러와 분리되어 **모든 가격 틱
 - 체결·청산·비상청산 시 즉시 갱신(Signal → Order → Fill → Position → Portfolio).
 - PAPER 모드는 가상 계좌가 Exchange View 역할을 합니다.
 
+## Backtest
+
+상단 `BACKTEST` 화면에서 `RUN BACKTEST`. PC에서 Binance 공개 데이터(API 키 불필요)를 받아 과거 구간을 재생합니다. 주문은 보내지 않습니다.
+
+- **저장된 현재 설정 그대로**: 전략 파라미터, Timeframe(Turtle·ADX 4H, TSMOM 1D, QQQ 미국 정규장), Stop(ATR/고정, min/max), Take Profit, Short ON/OFF, 수수료·슬리피지, 펀딩(과거 funding rate 적용).
+- 전략 코드는 실제 엔진과 같은 함수를 씁니다. 신호는 마감 캔들, 체결은 다음 캔들 시가(± 슬리피지), Stop은 진입 시 확정되어 캔들 고가/저가로 검사(갭은 시가 체결), Stop 후 재진입 규칙 동일. 지표 계산 구간도 실시간과 같은 길이(4H 1000봉, 1D 500봉).
+- 자금: 전략마다 별도 계좌(기본 ₩1,000,000). 종목 슬롯마다 진입 시점 계좌 평가액 / 종목 수(Compound) 또는 원금 / 종목 수(고정). 레버리지 1x.
+- 결과: 전략별 최종 금액·수익률·CAGR·MDD·거래수·승률·Profit Factor·Sharpe·수수료·펀딩·Buy&Hold 비교, 전체 합산, 자산 곡선, 캔들 위 진입/청산 표시, 거래 목록(클릭 → 차트 이동).
+- 수익률은 USDT 가격 기준입니다. 원화 금액은 원금에 그 수익률을 적용한 값이며 환율 변동은 반영하지 않습니다.
+- QQQUSDT는 2026-04-06 상장이라 EMA150·TSMOM126·SMA200은 지표 준비 기간이 부족해 1년 백테스트가 불가능합니다(화면 Notes에 표시). Controller 배율은 적용하지 않습니다(1.00x 기준).
+
 ## 알아둘 제한사항
 
 - PC가 꺼져 있으면 Binance Stop 외의 기능(신규 진입, 전략 Exit, Take Profit)은 동작하지 않습니다. 24시간 운용은 클라우드 서버에서 실행하세요.
@@ -217,6 +228,7 @@ server/strategyRegistry.js  자산군별 전략 매핑
 server/scheduler/     StrategyScheduler(캔들 마감 평가·중복 방지·catch-up), Timeframe, Signal Log
 server/risk/          RiskMonitor(실시간 Stop·청산가·연결 감시)
 server/portfolio/     PortfolioService(Exchange/Strategy View), User Data Stream, Reconciliation, Equity History
+server/backtest/      Backtester(전략 재생) + 과거 데이터 로더
 server/controller/    Self-Improving Controller (engine, 성과 평가, Regime, 결정 규칙, 저장, Shadow Portfolio)
 public/               터미널 UI (lightweight-charts)
 tools/mock-binance.js 개발용 가짜 거래소

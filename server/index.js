@@ -16,6 +16,7 @@ import { SignalLog } from './scheduler/signalLog.js';
 import { CRYPTO_TIMEFRAME_CHOICES, TF_LABEL } from './scheduler/timeframes.js';
 import { RiskMonitor } from './risk/riskMonitor.js';
 import { PortfolioService } from './portfolio/portfolioService.js';
+import { BacktestRunner } from './backtest/backtestRunner.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const HOST = process.env.HOST || '127.0.0.1';
@@ -33,6 +34,7 @@ const signalLog = new SignalLog();
 const scheduler = new StrategyScheduler({ store, md, engine, log, signalLog });
 const portfolio = new PortfolioService({ store, engine, md, log });
 const risk = new RiskMonitor({ engine, md, log, portfolio });
+const backtest = new BacktestRunner({ store, md, log, rest: md.rest }); // public market data only, never places orders
 const fullSnapshot = () => {
   const s = engine.snapshot();
   try { s.controller = controller.compact(); } catch (e) { s.controller = { mode: 'ERROR', error: e.message }; }
@@ -77,6 +79,20 @@ app.get('/api/portfolio/equity', (req, res) => {
 app.post('/api/portfolio/refresh', async (req, res) => { await portfolio.refreshExchange('manual'); ok(res, { ok: true }); });
 app.get('/api/signals', (req, res) => res.json(signalLog.recent({ limit: Math.min(2000, Number(req.query.limit) || 500), strategy: req.query.strategy || undefined, symbol: req.query.symbol || undefined })));
 app.get('/api/scheduler', (req, res) => res.json(scheduler.snapshot()));
+// ---- backtest (historical replay of the current strategy settings; no orders)
+app.post('/api/backtest/run', (req, res) => {
+  try {
+    const b = req.body || {};
+    const days = num(b.days ?? 365, { min: 7, max: 1000, int: true });
+    const capital = num(b.capital ?? 1_000_000, { min: 1000, max: 1e12 });
+    if (backtest.status.state === 'RUNNING') return ok(res, { ok: false, msg: 'backtest already running' });
+    backtest.run({ days, capital, compound: b.compound !== false });
+    ok(res, { ok: true });
+  } catch (e) { ok(res, { ok: false, msg: e.message }); }
+});
+app.get('/api/backtest/status', (req, res) => res.json(backtest.status));
+app.get('/api/backtest/result', (req, res) => res.json(backtest.last || null));
+app.get('/api/backtest/candles', (req, res) => res.json(backtest.candles[`${req.query.symbol}|${req.query.tf}`] || []));
 app.get('/api/logs', (req, res) => res.json(log.recent(1000)));
 
 app.get('/api/klines', async (req, res) => {

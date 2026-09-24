@@ -38,8 +38,8 @@ const dayStart = Math.floor(now0 / DAY) * DAY;
 for (const [s, c] of Object.entries(SYMS)) {
   let p = c.p * 0.55;
   const arr = [];
-  for (let d = 600; d >= 1; d--) {
-    const drift = Math.sin((600 - d) / 45) * 0.012;
+  for (let d = 1000; d >= 1; d--) {
+    const drift = Math.sin((1000 - d) / 45) * 0.012;
     const o = p;
     const cl = o * Math.exp(drift + c.vol * gauss());
     const h = Math.max(o, cl) * (1 + Math.abs(gauss()) * c.vol * 0.4);
@@ -61,23 +61,26 @@ function klines(sym, interval, limit, startTime) {
     for (let t = t0; t <= lastOpen && out.length < limit; t += ms) out.push(qqqBar(t, ms));
     return out;
   }
+  const all = [...h.daily, h.forming];
   if (interval === '1d') {
-    const rows = [...h.daily, h.forming].slice(-limit);
+    const rows = startTime ? all.filter((k) => k.t >= startTime).slice(0, limit) : all.slice(-limit);
     return rows.map((k) => [k.t, k.o, k.h, k.l, k.c, k.v, k.t + DAY - 1]);
   }
-  // Intraday synthetic: interpolate within daily candles
-  const out = [];
+  // Intraday synthetic, deterministic: path inside each daily candle (consistent across paged requests)
   const end = Math.floor(Date.now() / ms) * ms;
-  let p = h.price;
-  const tmp = [];
-  for (let i = 0; i < limit; i++) {
-    const t = end - i * ms;
-    const c = p;
-    const o = c / Math.exp(SYMS[sym].vol * 0.15 * gauss() * Math.sqrt(ms / 86_400_000) * 3);
-    tmp.push([t, o, Math.max(o, c) * 1.001, Math.min(o, c) * 0.999, c, 10 + rnd() * 100, t + ms - 1]);
-    p = o;
+  let t0 = startTime ? Math.ceil(startTime / ms) * ms : end - (limit - 1) * ms;
+  t0 = Math.max(t0, all[0].t);
+  const at = (t) => {
+    const d = all[Math.min(all.length - 1, Math.max(0, Math.floor((t - all[0].t) / DAY)))];
+    const f = Math.min(1, Math.max(0, (t - d.t) / DAY));
+    const base = d === h.forming ? d.o + (h.price - d.o) * f : d.o + (d.c - d.o) * f;
+    return base * (1 + 0.004 * Math.sin(t / 3_600_000) + 0.002 * Math.sin(t / 700_000));
+  };
+  const out = [];
+  for (let t = t0; t <= end && out.length < limit; t += ms) {
+    const o = at(t), c = t + ms > Date.now() ? h.price : at(t + ms);
+    out.push([t, o, Math.max(o, c) * 1.002, Math.min(o, c) * 0.998, c, 10 + ((t / ms) % 90), t + ms - 1]);
   }
-  for (let i = tmp.length - 1; i >= 0; i--) out.push(tmp[i]);
   return out;
 }
 
@@ -100,12 +103,18 @@ const server = http.createServer((req, res) => {
   const u = new URL(req.url, `http://${req.headers.host}`);
   const q = Object.fromEntries(u.searchParams);
   const p = u.pathname;
-  const priv = p !== '/fapi/v1/time' && p !== '/fapi/v1/exchangeInfo' && p !== '/fapi/v1/klines' && !p.startsWith('/mock/');
+  const priv = !['/fapi/v1/time', '/fapi/v1/exchangeInfo', '/fapi/v1/klines', '/fapi/v1/fundingRate'].includes(p) && !p.startsWith('/mock/');
   if (priv && !req.headers['x-mbx-apikey']) return json(res, 401, { code: -2015, msg: 'Invalid API-key' });
   if (p === '/fapi/v1/time') return json(res, 200, { serverTime: Date.now() });
   if (p === '/fapi/v1/exchangeInfo') {
     return json(res, 200, { symbols: Object.entries(SYMS).map(([s, c]) => ({ symbol: s, status: 'TRADING', contractType: c.tradfi ? 'TRADIFI_PERPETUAL' : 'PERPETUAL', quantityPrecision: 3, pricePrecision: 2,
       filters: [{ filterType: 'PRICE_FILTER', tickSize: c.tick }, { filterType: 'LOT_SIZE', stepSize: c.step, minQty: c.minQty, maxQty: '1000000' }, { filterType: 'MARKET_LOT_SIZE', stepSize: c.step, minQty: c.minQty, maxQty: '100000' }, { filterType: 'MIN_NOTIONAL', notional: c.minNotional }] })) });
+  }
+  if (p === '/fapi/v1/fundingRate') {
+    const st = Number(q.startTime || Date.now() - 30 * 86_400_000), et = Number(q.endTime || Date.now()), step = 8 * 3_600_000;
+    const out = [];
+    for (let t = Math.ceil(st / step) * step; t <= et && out.length < Number(q.limit || 100); t += step) out.push({ symbol: q.symbol, fundingTime: t, fundingRate: String(0.0001 * (1 + Math.sin(t / 86_400_000 / 9))), markPrice: '0' });
+    return json(res, 200, out);
   }
   if (p === '/fapi/v1/klines') {
     if (!SYMS[q.symbol]) return json(res, 400, { code: -1121, msg: 'Invalid symbol.' });

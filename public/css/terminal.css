@@ -298,3 +298,20 @@ body.view-portfolio #grid, body.view-portfolio #bottom { display: none; }
 .pf-costs td { font-size: 13px; padding: 5px 10px; }
 .sig-bar { display: flex; justify-content: space-between; align-items: center; }
 .sig-bar select { font-size: 10.5px; padding: 1px 3px; margin: 0 6px 0 3px; }
+#backtest { overflow: auto; background: var(--bg); padding: 8px; display: flex; flex-direction: column; gap: 8px; min-height: 0; }
+#backtest.hidden { display: none; }
+.view-switch { gap: 2px; }
+.view-switch button { padding: 1px 8px; }
+.bt-bar { display: flex; align-items: center; gap: 14px; padding: 8px 10px; flex-wrap: wrap; }
+.bt-bar b { color: var(--warn); letter-spacing: 1px; }
+.bt-bar input[type=number] { width: 110px; text-align: right; }
+.bt-note { font-size: 10.5px; margin-left: auto; }
+.bt-chart { height: 280px; position: relative; }
+.bt-chart.tall { height: 420px; }
+#btSummary tr[data-st] { cursor: pointer; }
+#btSummary tr.sel td { background: #1a212b; }
+.bt-notes { max-width: 320px; overflow: hidden; text-overflow: ellipsis; }
+.bt-kv td:first-child { width: 150px; }
+.bt-kv td.l { white-space: normal; }
+#btTrades tr[data-i] { cursor: pointer; }
+#portfolio > *, #backtest > * { flex: none; }
