@@ -17,7 +17,7 @@ export const LIVE_WINDOW = { '4h': 1000, '1d': 500, [US_SESSION]: Infinity };
 const dirOf = (side) => (side === 'LONG' ? 1 : -1);
 
 // custom (optional): { cfg, meta, timeframe, prepare(bars) -> (i) => signal } for AI rule strategies (server/ai/dsl.js)
-export function backtestStrategy({ strategy, config, data, funding = {}, start, end, capital, compound = true, symbols, custom = null }) {
+export async function backtestStrategy({ strategy, config, data, funding = {}, start, end, capital, compound = true, symbols, custom = null }) {
   symbols ||= custom?.symbols || symbolsForStrategy(strategy);
   const scfg = custom ? custom.cfg : config.strategies[strategy];
   const g = config.general;
@@ -79,7 +79,10 @@ export function backtestStrategy({ strategy, config, data, funding = {}, start, 
       tp: scfg.takeProfit?.enabled ? px * (1 + dirOf(side) * scfg.takeProfit.pct / 100) : null };
   };
 
+  let step = 0;
   for (const t of timeline) {
+    // yield to the event loop regularly: live price ticks / emergency stops must never wait for a backtest
+    if (++step % 100 === 0) await new Promise((r) => setImmediate(r));
     for (const s of symbols) {
       const i = idx[s].get(t);
       if (i == null) continue;
@@ -177,13 +180,15 @@ function benchmark(symbols, bars, idx, timeline, capital) {
 
 export function computeMetrics({ equity, trades, capital, timeline }) {
   const final = equity.length ? equity[equity.length - 1].equity : capital;
-  let peak = capital, maxDd = 0, ddStart = null, longestDd = 0, cur = 0;
+  // drawdown duration: from the time of the peak until equity is back at the peak (or the end of the test)
+  let peak = capital, peakT = equity.length ? equity[0].t : 0, maxDd = 0, inDd = false, longestDd = 0, cur = 0;
   for (const p of equity) {
-    if (p.equity >= peak) { peak = p.equity; if (ddStart != null) longestDd = Math.max(longestDd, p.t - ddStart); ddStart = null; } else if (ddStart == null) ddStart = p.t;
+    if (p.equity >= peak) { if (inDd) longestDd = Math.max(longestDd, p.t - peakT); peak = p.equity; peakT = p.t; inDd = false; } else inDd = true;
     const dd = (peak - p.equity) / peak * 100;
     if (dd > maxDd) maxDd = dd;
     cur = dd;
   }
+  if (inDd && equity.length) longestDd = Math.max(longestDd, equity[equity.length - 1].t - peakT); // drawdown still open at the end
   const wins = trades.filter((t) => t.net > 0), losses = trades.filter((t) => t.net <= 0);
   const gw = wins.reduce((a, t) => a + t.net, 0), gl = -losses.reduce((a, t) => a + t.net, 0);
   const years = timeline.length > 1 ? (timeline[timeline.length - 1] - timeline[0]) / (365 * 86_400_000) : 0;

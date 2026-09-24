@@ -238,6 +238,8 @@ export class MarketData extends EventEmitter {
     const arr = this.s[sym].bars[interval];
     const lastT = arr.length ? arr[arr.length - 1].t : 0;
     if (c.t <= lastT) return false; // duplicate close event
+    const prev = arr[arr.length - 1];
+    if (prev && c.t !== prev.T + 1) this.log.warn(`${sym} ${interval} candle gap: ${new Date(prev.T + 1).toISOString()} → ${new Date(c.t).toISOString()}`, 'DATA_GAP');
     arr.push(c);
     if (arr.length > STRATEGY_BARS[interval] + 100) arr.splice(0, arr.length - STRATEGY_BARS[interval]);
     this.emit('candleClose', { symbol: sym, interval, candle: c });
@@ -246,9 +248,14 @@ export class MarketData extends EventEmitter {
 
   async resyncBars(sym, interval, reason) {
     try {
-      const rows = (await this.rest.klines(sym, interval, 5)).map(toCandle);
+      // everything after the last stored bar (a long outage must not leave holes in the series)
+      const arr = this.s[sym].bars[interval];
+      const lastT = arr.length ? arr[arr.length - 1].t : Date.now() - 5 * 4 * 3600_000;
+      const rows = (await this.rest.publicGet('/fapi/v1/klines', { symbol: sym, interval, startTime: lastT + 1, limit: 1500 })).map(toCandle);
       const now = Date.now();
-      for (const c of rows) if (c.T < now && this.appendBar(sym, interval, c)) this.log.warn(`${sym} missed ${interval} close recovered via REST (${reason})`, 'DATA_RESYNC');
+      let n = 0;
+      for (const c of rows) if (c.T < now && this.appendBar(sym, interval, c)) n++;
+      if (n) this.log.warn(`${sym} ${n} missed ${interval} close(s) recovered via REST (${reason})`, 'DATA_RESYNC');
     } catch (e) {
       this.log.error(`${sym} ${interval} resync failed: ${e.message}`, 'API_ERROR');
     }
@@ -262,7 +269,7 @@ export class MarketData extends EventEmitter {
       for (const iv of Object.keys(STRATEGY_BARS)) this.resyncBars(sym, iv, reason);
       const lastT = st.daily.length ? st.daily[st.daily.length - 1].t : 0;
       try {
-        const rows = (await this.rest.klines(sym, DAILY, 5)).map(toCandle);
+        const rows = (await this.rest.publicGet('/fapi/v1/klines', { symbol: sym, interval: DAILY, startTime: lastT + 1, limit: 1500 })).map(toCandle);
         const now = Date.now();
         for (const c of rows) if (c.T < now && c.t > lastT) {
           this.log.warn(`${sym} missed daily close recovered via REST (${reason})`, 'DATA_RESYNC');

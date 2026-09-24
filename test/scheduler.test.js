@@ -346,3 +346,60 @@ test('live: scheduler entry with unknown order result is never resent on retry',
   await sch.tick(); await sch.tick();
   assert.equal(sent, 1);
 });
+
+test('scheduler: evaluations are serialized — two strategies never run their entry checks at the same time', async () => {
+  const { md, engine, sch } = setup();
+  let active = 0, maxActive = 0;
+  const orig = engine.evaluateSlot;
+  engine.evaluateSlot = async (...a) => { active++; maxActive = Math.max(maxActive, active); await new Promise((r) => setTimeout(r, 5)); try { return await orig(...a); } finally { active--; } };
+  close4h(md, 'BTCUSDT', 110); // TURTLE + ADX on BTC 4h close together
+  await sch.catchUp('bot start');
+  await new Promise((r) => setTimeout(r, 50));
+  assert.equal(maxActive, 1);
+});
+
+test('market data: resync after a long outage fills every missed 4h candle (no holes)', async () => {
+  const { MarketData } = await import('../server/marketData.js');
+  const log = new Logger(new Store());
+  const md = new MarketData(['BTCUSDT'], log);
+  const now = Date.now();
+  const last = Math.floor(now / H4) * H4 - 7 * H4; // 6 closed candles missed + 1 forming
+  md.s.BTCUSDT.bars['4h'] = series(flat(10), H4, last + H4);
+  const stored = md.s.BTCUSDT.bars['4h'];
+  md.rest = { publicGet: async (p, q) => { const out = []; for (let t = Math.ceil(q.startTime / H4) * H4; t < now; t += H4) out.push([t, 100, 101, 99, 100, 1, t + H4 - 1]); return out; } };
+  const closes = [];
+  md.on('candleClose', (e) => closes.push(e));
+  await md.resyncBars('BTCUSDT', '4h', 'test');
+  const arr = md.s.BTCUSDT.bars['4h'];
+  for (let i = 1; i < arr.length; i++) assert.equal(arr[i].t, arr[i - 1].T + 1, 'contiguous');
+  assert.equal(arr.at(-1).T + 1, Math.floor(now / H4) * H4, 'up to the last closed candle');
+  assert.ok(closes.length >= 6);
+  assert.equal(stored, arr);
+});
+
+test('user data stream: stop() during the listenKey request opens no socket', async () => {
+  let resolveKey;
+  const opened = [];
+  class FakeWS { constructor(u) { opened.push(u); this.h = {}; } on(e, f) { this.h[e] = f; } close() {} }
+  const uds = new UserDataStream({ getClient: () => ({ startUserStream: () => new Promise((r) => { resolveKey = r; }), closeUserStream: async () => {} }), wsBase: 'ws://x', log: new Logger(new Store()), WebSocketImpl: FakeWS });
+  uds.start();
+  await new Promise((r) => setImmediate(r));
+  await uds.stop();
+  resolveKey({ listenKey: 'k1' });
+  await new Promise((r) => setTimeout(r, 5));
+  assert.equal(opened.length, 0);
+  assert.equal(uds.ws, null);
+});
+
+test('portfolio: income rows sharing the last timestamp are not skipped', async () => {
+  const { pf, engine } = liveSetup();
+  const T = Date.now() - 60_000;
+  const all = [{ symbol: 'BTCUSDT', incomeType: 'REALIZED_PNL', income: '2', asset: 'USDT', time: T, tranId: 1 }];
+  engine.liveClient.income = async ({ startTime }) => all.filter((r) => r.time >= startTime);
+  await pf.refreshIncome();
+  all.push({ symbol: 'BTCUSDT', incomeType: 'COMMISSION', income: '-0.1', asset: 'USDT', time: T, tranId: 2 }); // same ms, arrives later
+  await pf.refreshIncome();
+  const inc = pf.history.m('LIVE').income;
+  assert.equal(inc.length, 2);
+  assert.equal(inc.filter((r) => r.tranId === '1').length, 1, 'no duplicates');
+});

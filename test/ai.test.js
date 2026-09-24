@@ -56,7 +56,7 @@ const EMA_CROSS = {
   stop: { mode: 'ATR_DYNAMIC', atrPeriod: 14, atrMult: 3, minPct: 5, maxPct: 20, fixedPct: 8 }, takeProfit: { enabled: false, pct: 20 }, resetAfterStop: true,
 };
 
-test('dsl: schema is closed (structured outputs requirement) and has no recursion', () => {
+test('dsl: schema is closed (structured outputs requirement) and has no recursion', async () => {
   const walk = (o, depth = 0) => {
     assert.ok(depth < 12, 'no recursion');
     if (o.type === 'object') { assert.equal(o.additionalProperties, false); assert.deepEqual([...o.required].sort(), Object.keys(o.properties).sort()); Object.values(o.properties).forEach((p) => walk(p, depth + 1)); }
@@ -65,14 +65,14 @@ test('dsl: schema is closed (structured outputs requirement) and has no recursio
   walk(STRATEGY_SCHEMA);
 });
 
-test('dsl: validation rejects unknown references and bad values; interpreter trades on crossovers', () => {
+test('dsl: validation rejects unknown references and bad values; interpreter trades on crossovers', async () => {
   assert.throws(() => validateDsl({ ...EMA_CROSS, long: { ...EMA_CROSS.long, entry: { mode: 'all', rules: [{ ...EMA_CROSS.long.entry.rules[0], left: { kind: 'indicator', ref: 'nope', value: 0, offset: 0, mult: 1 } }] } } }), /unknown indicator/);
   assert.throws(() => validateDsl({ ...EMA_CROSS, symbols: ['DOGEUSDT'] }), /symbol/);
   const d = validateDsl(EMA_CROSS);
   const custom = compileDsl(d);
   const bars = []; for (let i = 0; i < 400; i++) { const t = i * DAY, o = px(t), c = px(t + DAY); bars.push({ t, o, h: Math.max(o, c) * 1.003, l: Math.min(o, c) * 0.997, c, v: 1, T: t + DAY - 1 }); }
   const store = new Store(); store.config.general.includeFunding = false;
-  const r = backtestStrategy({ strategy: 'EMA_CROSS', config: store.config, data: { BTCUSDT: bars }, start: 50 * DAY, end: 400 * DAY, capital: 1_000_000, custom });
+  const r = await backtestStrategy({ strategy: 'EMA_CROSS', config: store.config, data: { BTCUSDT: bars }, start: 50 * DAY, end: 400 * DAY, capital: 1_000_000, custom });
   assert.ok(r.trades.length >= 1, `trades ${r.trades.length}`);
   assert.ok(r.trades.every((t) => t.side === 'LONG'));
   // exits only when fast < slow or stop
@@ -156,7 +156,7 @@ test('ai analyze: requires a backtest, stores the structured analysis', async ()
   assert.ok(d.metrics && d.byExitReason && d.monthlyReturnPct);
 });
 
-test('dsl: price operands and HIGHEST/LOWEST read candle fields (prior bars only)', () => {
+test('dsl: price operands and HIGHEST/LOWEST read candle fields (prior bars only)', async () => {
   const d = validateDsl({ ...EMA_CROSS, indicators: [{ id: 'hh', type: 'HIGHEST', period: 3, source: 'close' }],
     long: { enabled: true, entry: { mode: 'all', rules: [{ left: { kind: 'price', ref: 'close', value: 0, offset: 0, mult: 1 }, op: '>', right: { kind: 'indicator', ref: 'hh', value: 0, offset: 0, mult: 1 } }] }, exit: { mode: 'all', rules: [] } } });
   const flat = Array.from({ length: 80 }, (_, i) => ({ t: i, o: 10, h: 10.5, l: 9.5, c: 10, v: 1, T: i + 1 }));
@@ -164,4 +164,26 @@ test('dsl: price operands and HIGHEST/LOWEST read candle fields (prior bars only
   assert.equal(ev(5).ready, false, 'warm-up respected');
   assert.equal(ev(79).longCond, false, 'close 10 is not above prior high 10.5');
   assert.equal(ev(80).longCond, true, 'close 12 > prior 3-bar high 10.5 (current bar excluded)');
+});
+
+test('ai apply: settings edited after the run are kept (only the tested changes are re-applied)', async () => {
+  const { ai, store } = setup();
+  ai._reply = () => ({ analysis: 'x', candidates: [{ label: 'entry 30', hypothesis: 'y', changes: [{ path: 'params.entryPeriod', value: '30' }] }] });
+  ai.improve({ strategy: 'TURTLE', rounds: 1, days: 200 });
+  await waitJob(ai);
+  store.config.strategies.TURTLE.stop.atrMult = 3.3; // manual edit after the AI run
+  const c = ai.state.improvements.TURTLE.candidates[0];
+  assert.equal(ai.applyCandidate({ strategy: 'TURTLE', id: c.id }).ok, true);
+  assert.equal(store.config.strategies.TURTLE.params.entryPeriod, 30);
+  assert.equal(store.config.strategies.TURTLE.stop.atrMult, 3.3);
+});
+
+test('ai generate: prompt contains no full-period results of existing strategies', async () => {
+  const { ai, backtest, calls } = setup();
+  await backtest.run({ days: 120, capital: 1_000_000, strategies: ['TSMOM'] });
+  ai._reply = () => ({ notes: 'n', strategy: EMA_CROSS });
+  ai.generate({ rounds: 1, days: 120 });
+  await waitJob(ai);
+  const first = JSON.stringify(calls[0].messages[0].content);
+  assert.ok(!/returnPct|maxDrawdownPct/.test(first));
 });

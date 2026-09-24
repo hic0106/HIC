@@ -65,10 +65,11 @@ export class BacktestRunner {
   }
 
   // Loads (or reuses, 30 min) candles + funding for the given timeframes. need: [{ s, tf }]
-  async loadData(config, days, need, onMsg = () => {}) {
+  // `into`: extend an existing context (same period) instead of a possibly newer cache - keeps one job on one period
+  async loadData(config, days, need, onMsg = () => {}, into = null) {
     const end = Date.now();
     const start = end - days * DAY;
-    const c = (this.cache && this.cache.days === days && end - this.cache.at < 30 * 60_000) ? this.cache : { days, at: end, start, end, data: {}, funding: {} };
+    const c = into || ((this.cache && this.cache.days === days && end - this.cache.at < 30 * 60_000) ? this.cache : { days, at: end, start, end, data: {}, funding: {} });
     let k = 0;
     for (const { s, tf } of need) {
       if (c.data[tf]?.[s]) continue;
@@ -85,7 +86,7 @@ export class BacktestRunner {
         try { c.funding[s] = await this.fundingRates(s, c.start, c.end); } catch (e) { c.funding[s] = []; this.log.warn(`backtest: ${s} funding history unavailable (${e.message})`, 'BACKTEST'); }
       }
     }
-    this.cache = c;
+    if (!into) this.cache = c;
     return c;
   }
 
@@ -96,16 +97,16 @@ export class BacktestRunner {
   }
 
   // One strategy over [from, to) of the loaded period (built-in strategy or AI rule strategy via `custom`)
-  runOne({ config, ctx, strategy, custom = null, capital, compound, from = ctx.start, to = ctx.end }) {
+  async runOne({ config, ctx, strategy, custom = null, capital, compound, from = ctx.start, to = ctx.end }) {
     const tf = custom ? custom.timeframe : timeframeOf(strategy, config);
     return backtestStrategy({ strategy: strategy || custom?.meta?.label || 'AI', config, data: ctx.data[tf] || {}, funding: ctx.funding, start: from, end: to, capital, compound, custom });
   }
 
   // Full period + in-sample (first 70%) + out-of-sample (last 30%) - used by the AI improvement loop
-  runSplit(args, isFrac = 0.7) {
+  async runSplit(args, isFrac = 0.7) {
     const { ctx } = args;
     const cut = ctx.start + (ctx.end - ctx.start) * isFrac;
-    return { full: this.runOne(args), inSample: this.runOne({ ...args, from: ctx.start, to: cut }), outSample: this.runOne({ ...args, from: cut, to: ctx.end }), cut };
+    return { full: await this.runOne(args), inSample: await this.runOne({ ...args, from: ctx.start, to: cut }), outSample: await this.runOne({ ...args, from: cut, to: ctx.end }), cut };
   }
 
   async run({ days = 365, capital = 1_000_000, compound = true, strategies = ALL_STRATEGIES } = {}) {
@@ -119,7 +120,7 @@ export class BacktestRunner {
       for (const [i, st] of strategies.entries()) {
         this.status.msg = `running ${st}`;
         this.status.progress = 70 + Math.round((i / strategies.length) * 30);
-        const r = this.runOne({ config, ctx, strategy: st, capital, compound });
+        const r = await this.runOne({ config, ctx, strategy: st, capital, compound });
         r.assetClass = STRATEGY_CLASS[st];
         results.push(r);
         await new Promise((res) => setImmediate(res)); // keep the server responsive

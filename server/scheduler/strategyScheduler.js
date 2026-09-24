@@ -107,10 +107,18 @@ export class StrategyScheduler {
     return Promise.all(jobs);
   }
 
-  async run(inst, trigger) {
-    if (this.inflight.has(inst.key)) return { result: 'BUSY' };
-    if (this.md.s[inst.symbol]?.unavailable) return { result: 'SYMBOL_UNAVAILABLE' };
+  // Evaluations run one at a time (single queue): two strategies entering at the same candle close must not
+  // both pass the balance check against the same available balance before either order is filled.
+  run(inst, trigger) {
+    if (this.inflight.has(inst.key)) return Promise.resolve({ result: 'BUSY' });
+    if (this.md.s[inst.symbol]?.unavailable) return Promise.resolve({ result: 'SYMBOL_UNAVAILABLE' });
     this.inflight.add(inst.key);
+    const p = (this.queue || Promise.resolve()).then(() => this.runNow(inst, trigger)).finally(() => this.inflight.delete(inst.key));
+    this.queue = p.catch(() => {});
+    return p;
+  }
+
+  async runNow(inst, trigger) {
     try {
       const bars = barsFor(this.md, inst.strategy, inst.symbol, this.config);
       const last = bars.at(-1);
@@ -152,8 +160,6 @@ export class StrategyScheduler {
     } catch (err) {
       this.log.error(`${inst.strategy} ${inst.symbol} scheduler evaluation error: ${err.message}`, 'ENGINE_ERROR');
       return { result: 'ERROR', error: err.message };
-    } finally {
-      this.inflight.delete(inst.key);
     }
   }
 

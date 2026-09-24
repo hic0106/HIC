@@ -170,15 +170,16 @@ export class PortfolioService extends EventEmitter {
     if (!this.isLive()) return;
     const m = this.history.m('LIVE');
     const now = this.now();
-    let start = Math.max((m.incomeCursor ?? 0) + 1, now - 30 * DAY);
+    // inclusive start at the last seen timestamp: rows sharing that millisecond are re-read and de-duplicated by tranId
+    let start = Math.max(m.incomeCursor ?? 0, now - 30 * DAY);
     for (let page = 0; page < 10; page++) {
       const rows = await this.engine.liveClient.income({ startTime: start, endTime: now });
       if (!Array.isArray(rows) || !rows.length) break;
       this.history.addIncome('LIVE', rows);
       const maxT = Math.max(...rows.map((r) => Number(r.time)));
-      m.incomeCursor = maxT;
-      if (rows.length < 1000) break;
-      start = maxT + 1;
+      m.incomeCursor = Math.max(m.incomeCursor ?? 0, maxT);
+      if (rows.length < 1000 || maxT <= start) break; // done, or a full page inside one millisecond (no progress possible)
+      start = maxT;
     }
     if (m.incomeCursor == null) m.incomeCursor = now - 1;
   }

@@ -32,6 +32,7 @@ export class UserDataStream extends EventEmitter {
 
   async stop() {
     this.running = false;
+    this.gen = (this.gen || 0) + 1; // invalidates a connect() that is still waiting for its listenKey
     clearInterval(this.keepTimer);
     clearTimeout(this.retryTimer);
     const ws = this.ws;
@@ -44,15 +45,19 @@ export class UserDataStream extends EventEmitter {
 
   async connect() {
     if (!this.running) return;
+    const gen = this.gen || 0;
     this.status = 'CONNECTING';
     let key;
     try {
       key = (await this.getClient().startUserStream()).listenKey;
     } catch (e) {
+      if (gen !== (this.gen || 0) || !this.running) return;
       this.status = 'ERROR';
       this.log.warn(`User data stream listenKey failed: ${e.message} — REST polling continues`, 'USER_STREAM');
       return this.scheduleReconnect();
     }
+    if (gen !== (this.gen || 0) || !this.running) return; // stopped (or key changed) while waiting
+    try { this.ws?.close(); } catch { /* replace any previous socket */ }
     this.listenKey = key;
     const ws = new this.WS(`${this.wsBase}/private/stream?streams=${key}`);
     this.ws = ws;

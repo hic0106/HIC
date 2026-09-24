@@ -190,15 +190,15 @@ export class AiService {
       step('과거 데이터 준비', 5);
       const { config, ctx: ctx0 } = await this.context(days, [strategy]);
       // both timeframes available so a timeframe change can be tested
-      const ctx = STRATEGY_CLASS[strategy] === 'CRYPTO' ? await this.backtest.loadData(config, days, symbolsForStrategy(strategy).flatMap((s) => [{ s, tf: '4h' }, { s, tf: '1d' }])) : ctx0;
+      const ctx = STRATEGY_CLASS[strategy] === 'CRYPTO' ? await this.backtest.loadData(config, days, symbolsForStrategy(strategy).flatMap((s) => [{ s, tf: '4h' }, { s, tf: '1d' }]), undefined, ctx0) : ctx0;
       const capital = 1_000_000;
-      const runWith = (cfg) => {
+      const runWith = async (cfg) => {
         const c = structuredClone(config);
         c.strategies[strategy] = cfg;
         return this.backtest.runSplit({ config: c, ctx, strategy, capital, compound: true });
       };
       const cur = config.strategies[strategy];
-      const base = runWith(cur);
+      const base = await runWith(cur);
       const cutDay = ymd(base.cut);
       const history = [];
       const candidates = [];
@@ -217,7 +217,7 @@ export class AiService {
           try {
             const { next, applied } = applyChanges(cur, c.changes);
             const valid = validateStrategySettings(strategy, next, cur);
-            const res = runWith(valid);
+            const res = await runWith(valid);
             Object.assign(cand, { changes: applied, settings: valid, inSample: brief(res.inSample), outSample: brief(res.outSample), full: brief(res.full) });
             history.push({ label: c.label, changes: applied.map((a) => `${a.path}: ${a.from} -> ${a.to}`), inSample: cand.inSample });
           } catch (e) {
@@ -250,7 +250,9 @@ export class AiService {
     if (!c || c.error) return { ok: false, msg: '후보를 찾을 수 없습니다' };
     const cur = this.store.config.strategies[strategy];
     // keep the user's current order amounts / enabled flag; take only the tested strategy settings
-    const next = validateStrategySettings(strategy, { ...c.settings, amounts: cur.amounts, enabled: cur.enabled }, cur);
+    // re-apply only the tested changes on top of the CURRENT settings (anything edited since the run is kept)
+    const { next: merged } = applyChanges(cur, c.changes.map((a) => ({ path: a.path, value: String(a.to) })));
+    const next = validateStrategySettings(strategy, merged, cur);
     const prev = structuredClone(cur);
     this.store.config.strategies[strategy] = next;
     this.controller?.onStrategyConfigChanged(strategy, prev, next);
@@ -268,14 +270,15 @@ export class AiService {
     return this.startJob('generate', async (step) => {
       step('과거 데이터 준비', 5);
       const { config, ctx } = await this.context(days);
-      const existing = this.backtest.last?.results?.filter((r) => STRATEGY_CLASS[r.strategy] === 'CRYPTO').map((r) => ({ strategy: r.strategy, timeframe: r.timeframe, ...brief(r) })) || [];
+      // names / timeframes only: full-period results would reveal the hidden validation period
+      const existing = ALL_STRATEGIES.filter((st) => STRATEGY_CLASS[st] === 'CRYPTO').map((st) => ({ strategy: st, timeframe: timeframeOf(st, config), rule: META[st].label }));
       const messages = [];
       const versions = [];
       const cut = ctx.start + (ctx.end - ctx.start) * 0.7;
       for (let round = 1; round <= rounds; round++) {
         step(`${round}/${rounds}회차 · Claude가 전략 설계`, 10 + Math.round(((round - 1) / rounds) * 80));
         const prompt = round === 1
-          ? `새 매매 전략을 규칙 형식으로 설계하세요.\n사용자 아이디어: ${idea ? JSON.stringify(idea) : '(없음 — 기존 전략과 겹치지 않는 견고한 전략을 제안)'}\n기존 전략 성과(참고): ${JSON.stringify(existing)}\n학습 구간: ${ymd(ctx.start)} ~ ${ymd(cut)} (그 이후는 검증용이라 보여주지 않습니다)\n규칙 형식: 지표는 id로 선언하고 규칙에서 kind=indicator, ref=id로 참조. HIGHEST/LOWEST는 현재 봉을 제외한 이전 N봉. MOMENTUM_PCT는 N봉 수익률(%). crossAbove/crossBelow는 직전 봉 대비 교차. offset은 몇 봉 전 값, mult는 배수(1=없음). 청산 규칙이 없으면 손절/익절로만 청산.`
+          ? `새 매매 전략을 규칙 형식으로 설계하세요.\n사용자 아이디어: ${idea ? JSON.stringify(idea) : '(없음 — 기존 전략과 겹치지 않는 견고한 전략을 제안)'}\n기존 전략(겹치지 않게): ${JSON.stringify(existing)}\n학습 구간: ${ymd(ctx.start)} ~ ${ymd(cut)} (그 이후는 검증용이라 보여주지 않습니다)\n규칙 형식: 지표는 id로 선언하고 규칙에서 kind=indicator, ref=id로 참조. HIGHEST/LOWEST는 현재 봉을 제외한 이전 N봉. MOMENTUM_PCT는 N봉 수익률(%). crossAbove/crossBelow는 직전 봉 대비 교차. offset은 몇 봉 전 값, mult는 배수(1=없음). 청산 규칙이 없으면 손절/익절로만 청산.`
           : `이전 버전의 학습 구간 백테스트 결과입니다:\n${JSON.stringify(versions.at(-1).feedback)}\n\n약점을 고쳐 전략 전체를 다시 작성하세요. 과최적화를 피하고 거래 수가 충분하도록 유지하세요.`;
         messages.push({ role: 'user', content: prompt });
         const r = await this.claude.json({ system: SYSTEM, schema: GENERATE_SCHEMA, messages, effort: 'high' });
@@ -285,8 +288,8 @@ export class AiService {
           v.dsl = validateDsl(r.data.strategy);
           v.rules = describeRules(v.dsl);
           step(`${round}/${rounds}회차 · 백테스트`, 10 + Math.round(((round - 0.5) / rounds) * 80));
-          await this.backtest.loadData(config, days, v.dsl.symbols.map((s) => ({ s, tf: v.dsl.timeframe })));
-          const res = this.backtest.runSplit({ config, ctx: this.backtest.cache, custom: compileDsl(v.dsl), strategy: v.dsl.name, capital: 1_000_000, compound: true });
+          await this.backtest.loadData(config, days, v.dsl.symbols.map((s) => ({ s, tf: v.dsl.timeframe })), undefined, ctx); // same period as told to Claude
+          const res = await this.backtest.runSplit({ config, ctx, custom: compileDsl(v.dsl), strategy: v.dsl.name, capital: 1_000_000, compound: true });
           Object.assign(v, { inSample: brief(res.inSample), outSample: brief(res.outSample), full: brief(res.full), trades: res.full.trades.slice(-200) });
           v.feedback = diagnose(res.inSample);
           // needs enough trades to mean anything, profit in both periods, and return per drawdown above 0.3 in-sample
