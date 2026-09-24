@@ -5,10 +5,13 @@ import { ST_COLOR } from './chart.js';
 
 const LC = window.LightweightCharts;
 const SYM_COLOR = { BTCUSDT: '#f7931a', ETHUSDT: '#627eea', XRPUSDT: '#9aa4b1', QQQUSDT: '#26c6da', CASH: '#2b3440' };
+// other coins (dynamic universe): stable color from the symbol name
+const PALETTE = ['#e07a5f', '#81b29a', '#f2cc8f', '#9b5de5', '#00bbf9', '#f15bb5', '#90be6d', '#43aa8b', '#ff9f1c', '#8d99ae'];
+const symColor = (s) => SYM_COLOR[s] || PALETTE[[...s].reduce((a, ch) => (a * 31 + ch.charCodeAt(0)) >>> 0, 7) % PALETTE.length];
 const CLASS_COLOR = { CRYPTO: '#f0b90b', TRADFI_INDEX: '#26c6da', CASH: '#2b3440' };
-const SHORT = { TURTLE: '터틀', ADX: 'ADX', TSMOM: 'TSMOM', QQQ_EMA_TREND: 'QQQ EMA', QQQ_TSMOM: 'QQQ TSMOM', QQQ_SMA200: 'QQQ SMA200', QQQ_TURTLE_50_20: 'QQQ 터틀50/20', UNATTRIBUTED: '미귀속(수동)' };
+const SHORT = { TURTLE: '터틀', ADX: 'ADX', TSMOM: 'TSMOM', RAYNER: 'Rayner', QQQ_EMA_TREND: 'QQQ EMA', QQQ_TSMOM: 'QQQ TSMOM', QQQ_SMA200: 'QQQ SMA200', QQQ_TURTLE_50_20: 'QQQ 터틀50/20', UNATTRIBUTED: '미귀속(수동)' };
 const SIDE = { LONG: '롱', SHORT: '숏' };
-const LBL = { ALL: '전체', CRYPTO: '코인', TRADFI: 'QQQ', LONG: '롱', SHORT: '숏', TURTLE: '터틀', ADX: 'ADX', TSMOM: 'TSMOM', QQQ: 'QQQ', TODAY: '오늘', '7D': '7일', '30D': '30일', '1D': '1일', '1M': '1개월', '3M': '3개월' };
+const LBL = { ALL: '전체', CRYPTO: '코인', TRADFI: 'QQQ', LONG: '롱', SHORT: '숏', TURTLE: '터틀', ADX: 'ADX', TSMOM: 'TSMOM', RAYNER: 'Rayner', QQQ: 'QQQ', TODAY: '오늘', '7D': '7일', '30D': '30일', '1D': '1일', '1M': '1개월', '3M': '3개월' };
 const TZ = -new Date().getTimezoneOffset() * 60;
 
 const P = {
@@ -43,7 +46,7 @@ export function mountPortfolio(root, meta) {
     <div class="pf-card"><div class="panel-h">전체 포지션 <span class="pf-tools" id="pfPosFilter">
         <span class="seg" data-f="cls">${['ALL', 'CRYPTO', 'TRADFI'].map((x) => `<button data-v="${x}" class="${x === 'ALL' ? 'on' : ''}">${LBL[x]}</button>`).join('')}</span>
         <span class="seg" data-f="side">${['ALL', 'LONG', 'SHORT'].map((x) => `<button data-v="${x}" class="${x === 'ALL' ? 'on' : ''}">${LBL[x]}</button>`).join('')}</span>
-        <span class="seg" data-f="st">${['ALL', 'TURTLE', 'ADX', 'TSMOM', 'QQQ'].map((x) => `<button data-v="${x}" class="${x === 'ALL' ? 'on' : ''}">${LBL[x]}</button>`).join('')}</span></span></div>
+        <span class="seg" data-f="st">${['ALL', 'TURTLE', 'ADX', 'TSMOM', 'RAYNER', 'QQQ'].map((x) => `<button data-v="${x}" class="${x === 'ALL' ? 'on' : ''}">${LBL[x]}</button>`).join('')}</span></span></div>
       <div id="pfPositions"></div></div>
     <div class="pf-row two">
       <div class="pf-card"><div class="panel-h">손익 분석 <span class="pf-tools"><span class="seg" id="pfPeriod">${['TODAY', '7D', '30D', 'ALL'].map((x) => `<button data-v="${x}" class="${x === P.period ? 'on' : ''}">${LBL[x]}</button>`).join('')}</span>
@@ -103,7 +106,7 @@ function donut(parts) {
 
 function renderAlloc() {
   const a = P.data.allocation;
-  const items = [...a.bySymbol.map((x) => ({ k: x.symbol, label: x.symbol.replace('USDT', ''), v: x.margin, pct: x.pct, notional: x.notional, c: SYM_COLOR[x.symbol] })), { k: 'CASH', label: '현금', v: a.cash, pct: a.cashPct, c: SYM_COLOR.CASH }];
+  const items = [...a.bySymbol.map((x) => ({ k: x.symbol, label: x.symbol.replace('USDT', ''), v: x.margin, pct: x.pct, notional: x.notional, c: symColor(x.symbol) })), { k: 'CASH', label: '현금', v: a.cash, pct: a.cashPct, c: SYM_COLOR.CASH }];
   const cl = a.byClass;
   const bar = (k, v) => `<div class="pf-bar"><span style="width:${Math.max(0, Math.min(100, v || 0))}%;background:${CLASS_COLOR[k]}"></span></div>`;
   $('#pfAlloc').innerHTML = `<div class="pf-alloc">${donut(items)}

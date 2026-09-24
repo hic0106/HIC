@@ -7,7 +7,7 @@
 //   Controller = base order × controller multiplier (0 … 1.25)
 // The baseline book is also the controller's performance data source: it is not distorted by
 // controller sizing and keeps accumulating while a strategy is PAUSED.
-import { ALL_STRATEGIES as STRATEGIES, META as STRATEGY_META, evaluateStrategy as evaluate, stopDistancePct, strategiesForSymbol, STRATEGY_CLASS } from '../strategyRegistry.js';
+import { ALL_STRATEGIES as STRATEGIES, META as STRATEGY_META, evaluateStrategy as evaluate, strategiesForSymbol, STRATEGY_CLASS, exitFor, entryStop, stopReasonOf, trendCounts, recordTrendEntry } from '../strategyRegistry.js';
 import { barsFor, timeframeOf } from '../scheduler/timeframes.js';
 
 const dirOf = (side) => (side === 'LONG' ? 1 : -1);
@@ -18,7 +18,9 @@ export function emptyShadowState() {
 }
 
 export class ShadowPortfolio {
-  constructor({ md, getConfig, symbols, proposedMultiplier, state }) {
+  // canEnter(symbol): same trade-universe gate as the engine (watch-only symbols: exits only)
+  constructor({ md, getConfig, symbols, proposedMultiplier, state, canEnter = () => true }) {
+    this.canEnter = canEnter;
     this.md = md;
     this.getConfig = getConfig;
     this.symbols = symbols;
@@ -61,32 +63,39 @@ export class ShadowPortfolio {
     slot.lastCandle = sig.candleTime;
 
     if (slot.pos) {
-      const exit = slot.pos.side === 'LONG' ? sig.longExit : sig.shortExit;
-      if (!exit) return;
-      this.close(strategy, symbol, sig.close, 'STRATEGY_EXIT', now);
+      const ex = exitFor(strategy, sig, slot.pos);
+      if (!ex.exit) return;
+      this.close(strategy, symbol, sig.close, ex.reason, now);
     }
     if (!sig.longCond) slot.block.LONG = false;
     if (!sig.shortCond) slot.block.SHORT = false;
     let side = null;
     if (sig.longCond) side = 'LONG';
     else if (sig.shortCond && scfg.shortEnabled && STRATEGY_META[strategy].supportsShort) side = 'SHORT';
-    if (side && !slot.block[side]) this.open(strategy, symbol, side, sig.close, sig.atr, now);
+    if (side && STRATEGY_META[strategy].trendEntries && trendCounts(sig, slot.trendEntries)[side] >= scfg.params.maxEntriesPerTrend) side = null;
+    let ok = true;
+    try { ok = !side || this.canEnter(symbol); } catch { ok = true; }
+    if (side && ok && !slot.block[side]) this.open(strategy, symbol, side, sig.close, sig, now);
   }
 
-  open(strategy, symbol, side, price, atrValue, now) {
+  open(strategy, symbol, side, price, sigOrAtr, now) {
+    const sig = typeof sigOrAtr === 'number' || sigOrAtr == null ? { atr: sigOrAtr } : sigOrAtr; // number = ATR (older callers)
     const cfg = this.getConfig();
     const scfg = cfg.strategies[strategy];
     const { fee, slip } = this.costs();
     const entry = price * (1 + dirOf(side) * slip);
-    const distPct = stopDistancePct(scfg.stop, atrValue, entry);
+    const es = entryStop(scfg.stop, sig, side, entry);
+    if (es.invalid) return; // structure stop on the wrong side: no entry (mirrors engine / backtest)
     const amounts = scfg.amounts[cfg.general.mode] || scfg.amounts.PAPER;
     const baseAmount = Number(side === 'LONG' ? amounts.long : amounts.short) || 0;
     let mult = 1;
     try { mult = this.proposedMultiplier(strategy, side); } catch { mult = 1; }
-    this.slot(strategy, symbol).pos = {
+    const slot = this.slot(strategy, symbol);
+    if (STRATEGY_META[strategy].trendEntries) slot.trendEntries = recordTrendEntry(slot.trendEntries, side, sig?.candleTime);
+    slot.pos = {
       side, entryPrice: entry, entryTime: now,
-      stopPrice: distPct == null ? null : entry * (1 - dirOf(side) * distPct / 100),
-      stopMode: scfg.stop.mode,
+      stopPrice: es.stopPrice,
+      stopMode: scfg.stop.mode, histTarget: sig?.histTarget?.[side] ?? null,
       tpPrice: scfg.takeProfit.enabled ? entry * (1 + dirOf(side) * scfg.takeProfit.pct / 100) : null,
       baseAmount, mult, fee, funding: 0,
     };
@@ -127,7 +136,7 @@ export class ShadowPortfolio {
       const pos = this.state.slots[`${st}:${symbol}`]?.pos;
       if (!pos) continue;
       const d = dirOf(pos.side);
-      if (pos.stopPrice != null && (price - pos.stopPrice) * d <= 0) this.close(st, symbol, price, pos.stopMode === 'FIXED_PERCENT' ? 'FIXED_STOP' : 'ATR_STOP', now);
+      if (pos.stopPrice != null && (price - pos.stopPrice) * d <= 0) this.close(st, symbol, price, stopReasonOf(pos.stopMode), now);
       else if (pos.tpPrice != null && (price - pos.tpPrice) * d >= 0) this.close(st, symbol, price, 'TAKE_PROFIT', now);
     }
   }

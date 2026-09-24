@@ -1,7 +1,7 @@
 // Trading engine: strategy evaluation, pre-trade checks, paper/live execution,
 // emergency stops, funding, PnL accounting and UI snapshot.
 import { BinanceClient, BinanceError, endpoints, floorToStep, fmtQty, roundToTick, fmtPrice } from './binance.js';
-import { ALL_STRATEGIES as STRATEGIES, META as STRATEGY_META, evaluateStrategy as evaluate, stopDistancePct, strategiesForSymbol, STRATEGY_CLASS } from './strategyRegistry.js';
+import { ALL_STRATEGIES as STRATEGIES, META as STRATEGY_META, evaluateStrategy as evaluate, strategiesForSymbol, STRATEGY_CLASS, exitFor, entryStop, stopReasonOf, trendCounts, recordTrendEntry } from './strategyRegistry.js';
 import { SYMBOLS, emptyModeState } from './store.js';
 import { SYMBOL_META, assetClassOf, ASSET_CLASSES } from './assets.js';
 import { EventEmitter } from 'node:events';
@@ -32,6 +32,7 @@ export class Engine {
     this.lastTickCheck = {};
     this.events = new EventEmitter(); // 'change' after fills / closes -> portfolio refresh
     this.scheduler = null; // StrategyScheduler (candle-close driven evaluation)
+    this.universe = null; // UniverseManager: crypto NEW entries only for the trade universe (exits never blocked)
     this.rebuildLiveClient();
     const paper = this.ms('PAPER');
     if (paper.baseCapital == null) paper.baseCapital = paper.wallet ?? this.cfg.general.paperInitialBalance;
@@ -282,6 +283,7 @@ export class Engine {
     if (!sig.ready) { slot.view = { notReady: sig.reason }; return { result: 'NOT_READY', reason: sig.reason, final: false, sig }; }
     slot.view = sig.view;
     slot.evalCandle = sig.candleTime;
+    if (STRATEGY_META[strategy].trendEntries) slot.trendCount = trendCounts(sig, slot.trendEntries);
     slot.signal = { longCond: sig.longCond, shortCond: sig.shortCond, longExit: sig.longExit, shortExit: sig.shortExit };
     const out = (result, final, extra = {}) => ({ result, final, sig, ...extra });
 
@@ -300,16 +302,16 @@ export class Engine {
     let exited = null;
     if (slot.position) {
       const side = slot.position.side;
-      const exit = side === 'LONG' ? sig.longExit : sig.shortExit;
-      if (exit) {
-        this.log.trade(`${tag} ${side} EXIT signal (${STRATEGY_META[strategy].exitRule(scfg.params)})${allowEntry ? '' : ' — late evaluation'}`, 'SIGNAL');
-        const r = await this.closePosition(strategy, symbol, 'STRATEGY_EXIT');
+      const ex = exitFor(strategy, sig, slot.position);
+      if (ex.exit) {
+        this.log.trade(`${tag} ${side} EXIT signal (${ex.reason === 'STRATEGY_EXIT' ? STRATEGY_META[strategy].exitRule(scfg.params) : `${ex.reason} hist ${sig.hist?.toPrecision(4)} vs target ${slot.position.histTarget?.toPrecision(4)}`})${allowEntry ? '' : ' — late evaluation'}`, 'SIGNAL');
+        const r = await this.closePosition(strategy, symbol, ex.reason);
         if (!r.ok) {
           if (r.transient) return this.skip(slot, sig, r.code, r.msg);
           slot.lastActedCandle = sig.candleTime;
           return out(`EXIT_FAILED ${r.code || ''}`.trim(), true);
         }
-        exited = `EXIT ${side}`;
+        exited = ex.reason === 'STRATEGY_EXIT' ? `EXIT ${side}` : `EXIT ${side} ${ex.reason}`;
       } else {
         slot.lastSignal = `HOLD ${side}`;
         slot.lastActedCandle = sig.candleTime;
@@ -340,6 +342,15 @@ export class Engine {
       if (slot.lastSkip?.code !== 'REARM') this.log.info(`${tag} ${side} condition true but waiting for reset after stop exit`, 'REARM');
       slot.lastSkip = null;
       return out(exited ? `${exited} · WAIT_REARM ${side}` : `WAIT_REARM ${side}`, true);
+    }
+    // Rayner: at most maxEntriesPerTrend entries per side until a candle closes on the other side of the EMA
+    if (STRATEGY_META[strategy].trendEntries && (slot.trendCount?.[side] || 0) >= scfg.params.maxEntriesPerTrend) {
+      slot.lastSignal = `WAIT (${side} max entries per trend)`;
+      slot.lastActedCandle = sig.candleTime;
+      slot.lastSkip = null;
+      this.log.info(`${tag} ${side} signal ignored: ${slot.trendCount[side]}/${scfg.params.maxEntriesPerTrend} entries already in this trend`, 'MAX_TREND_ENTRIES');
+      this.store.saveState();
+      return out(exited ? `${exited} · MAX_TREND_ENTRIES ${side}` : `MAX_TREND_ENTRIES ${side}`, true);
     }
     if (!allowEntry) {
       slot.lastSignal = `WAIT (stale ${side} signal skipped)`;
@@ -380,6 +391,8 @@ export class Engine {
       if (!scfg.enabled) return fail('STRATEGY_DISABLED', `${strategy} disabled`);
       if (side === 'SHORT' && (!scfg.shortEnabled || !STRATEGY_META[strategy].supportsShort)) return fail('SHORT_DISABLED', `${strategy} short disabled`);
       if (slot.position || slot.status !== 'FLAT') return fail('POSITION_EXISTS', `${strategy} ${symbol} already has a position (${slot.status})`);
+      // checked right before every new entry (exits are never blocked by the universe)
+      if (this.universe && !this.universe.isTradeAllowed(symbol)) return fail('UNIVERSE_FILTER', `${symbol} is watched but outside the top ${this.universe.cfg.tradeTopN} by 24h quote volume — new entry not allowed`);
     }
     if (slot.pending) return fail('ORDER_PENDING', `${strategy} ${symbol} has pending order`);
     if (this.md.status !== 'CONNECTED' || this.md.isStale(symbol, g.dataStaleSec)) return fail('DATA_DELAY', `${symbol} market data stale/disconnected`);
@@ -428,22 +441,37 @@ export class Engine {
     if (this.busy.has(key)) return { ok: false, code: 'BUSY', transient: true, msg: 'busy' };
     this.busy.add(key);
     try {
-      const chk = await this.preTradeChecks(strategy, symbol, side);
+      let chk = await this.preTradeChecks(strategy, symbol, side);
       const tag = `${strategy} ${symbol.replace('USDT', '')}`;
+      const scfg = this.cfg.strategies[strategy];
+      if (chk.ok && scfg.stop.mode === 'STRUCTURE') {
+        // structure stop must be below (long) / above (short) the expected fill price, else no entry
+        const slip = this.cfg.general.slippagePct / 100;
+        const es = entryStop(scfg.stop, sig, side, chk.price * (1 + dirOf(side) * slip));
+        if (es.invalid) chk = { ok: false, code: 'STOP_INVALID', msg: `${tag} ${side}: structure stop ${sig?.structStop?.[side] ?? '—'} is not ${side === 'LONG' ? 'below' : 'above'} the entry price ${chk.price} — entry cancelled`, transient: false };
+      }
       if (!chk.ok) {
-        if (!chk.transient) this.log.warn(`${tag} ${side} order skipped: ${chk.msg}`, chk.code);
+        // watch-only symbols (outside the trade universe) are expected to be skipped: info, not a warning
+        if (!chk.transient) this.log[chk.code === 'UNIVERSE_FILTER' ? 'info' : 'warn'](`${tag} ${side} order skipped: ${chk.msg}`, chk.code);
         return chk;
       }
       const ctlNote = chk.ctrl.status === 'OFF' || chk.ctrl.status === 'NOT_APPLIED' ? '' : ` (base ${chk.baseAmount} × ${chk.ctrl.multiplier} controller ${chk.ctrl.status})`;
       this.log.trade(`${tag} requested order: ${chk.amount} USDT${ctlNote} → qty ${fmtQty(chk.qty, chk.filters.stepSize)} (≈${chk.notional.toFixed(2)} USDT) ${this.mode} ${chk.leverage}x`, 'ORDER_REQUEST');
       const slot = this.slot(strategy, symbol);
       const order = this.newOrderRecord({ strategy, symbol, action: 'OPEN', side, qty: chk.qty, amount: chk.amount, refPrice: chk.price });
-      slot.pending = { clientOrderId: order.clientOrderId, action: 'OPEN', side, qty: chk.qty, amount: chk.amount, baseAmount: chk.baseAmount, ctrlMultiplier: chk.ctrl.multiplier, ctrlStatus: chk.ctrl.status, atr: sig?.atr ?? null, createdAt: Date.now(), notFound: 0 };
+      slot.pending = { clientOrderId: order.clientOrderId, action: 'OPEN', side, qty: chk.qty, amount: chk.amount, baseAmount: chk.baseAmount, ctrlMultiplier: chk.ctrl.multiplier, ctrlStatus: chk.ctrl.status, atr: sig?.atr ?? null,
+        structStop: sig?.structStop?.[side] ?? null, histTarget: sig?.histTarget?.[side] ?? null, signalCandle: sig?.candleTime ?? null, createdAt: Date.now(), notFound: 0 };
       slot.status = 'PENDING';
       this.store.saveStateNow(); // persist intent BEFORE sending (crash safety)
       return await this.execute(slot, order);
     } finally {
       this.busy.delete(key);
+      // filled although the structure stop ended up on the wrong side of the actual fill (slippage) -> undo the entry
+      const pos = this.ms().slots[key]?.position;
+      if (pos?.stopInvalid && !this.ms().slots[key].pending) {
+        this.log.error(`${strategy} ${symbol.replace('USDT', '')} ${pos.side} fill ${pos.entryPrice} is beyond the structure stop ${pos.stopPrice} — closing (entry cancelled)`, 'STOP_INVALID');
+        await this.closePosition(strategy, symbol, 'STOP_INVALID');
+      }
     }
   }
 
@@ -583,20 +611,23 @@ export class Engine {
 
     if (pend.action === 'OPEN') {
       const side = pend.side;
-      const distPct = stopDistancePct(scfg.stop, pend.atr, fill.avgPrice);
+      const es = entryStop(scfg.stop, { atr: pend.atr, structStop: { [side]: pend.structStop } }, side, fill.avgPrice);
+      const distPct = es.distPct;
       const tick = this.md.filters[slot.symbol]?.tickSize || 0;
-      const stopPrice = distPct == null ? null : roundToTick(fill.avgPrice * (1 - dirOf(side) * distPct / 100), tick);
+      const stopPrice = es.stopPrice == null ? null : roundToTick(es.stopPrice, tick);
       const tpPrice = scfg.takeProfit.enabled ? fill.avgPrice * (1 + dirOf(side) * scfg.takeProfit.pct / 100) : null;
       slot.position = {
         strategy: slot.strategy, symbol: slot.symbol, side, entryPrice: fill.avgPrice, qty: fill.executedQty,
         orderAmount: pend.amount, baseAmount: pend.baseAmount ?? pend.amount, ctrlMultiplier: pend.ctrlMultiplier ?? 1, ctrlStatus: pend.ctrlStatus ?? 'OFF', entryNotional: fill.avgPrice * fill.executedQty, entryFee: fill.fee, funding: 0,
         entryTime: Date.now(), stopPrice, stopPct: distPct, stopMode: scfg.stop.mode, tpPrice, atrAtEntry: pend.atr,
+        histTarget: pend.histTarget ?? null, signalCandle: pend.signalCandle ?? null, ...(es.invalid && scfg.stop.mode === 'STRUCTURE' ? { stopInvalid: true } : {}),
         leverage: this.leverageFor(slot.strategy), clientOrderId: order.clientOrderId,
       };
       slot.status = side;
       slot.lastSignal = `${side} ENTRY`;
+      if (STRATEGY_META[slot.strategy].trendEntries && !slot.position.stopInvalid && pend.signalCandle != null) slot.trendEntries = recordTrendEntry(slot.trendEntries, side, pend.signalCandle);
       if (ms.wallet != null && this.mode === 'PAPER') ms.wallet -= fill.fee;
-      this.log.trade(`${tag} ${side} opened @ ${fill.avgPrice} qty ${fill.executedQty}${stopPrice ? ` — stop initialized ${stopPrice.toPrecision(6)} (${distPct.toFixed(2)}%)` : ' — no emergency stop'}`, 'STOP_INIT');
+      this.log.trade(`${tag} ${side} opened @ ${fill.avgPrice} qty ${fill.executedQty}${stopPrice ? ` — stop initialized ${stopPrice.toPrecision(6)}${distPct != null ? ` (${distPct.toFixed(2)}%)` : ''} ${scfg.stop.mode}` : ' — no emergency stop'}${slot.position.histTarget != null ? ` · hist target ${slot.position.histTarget.toPrecision(4)}` : ''}`, 'STOP_INIT');
     } else {
       const pos = slot.position;
       const qty = Math.min(fill.executedQty, pos.qty);
@@ -694,7 +725,7 @@ export class Engine {
       if (now - (slot.lastStopTry || 0) < 5000) continue; // throttle retries of failed stop closes
       const d = dirOf(pos.side);
       if (pos.stopPrice != null && (price - pos.stopPrice) * d <= 0) {
-        const reason = pos.stopMode === 'FIXED_PERCENT' ? 'FIXED_STOP' : 'ATR_STOP';
+        const reason = stopReasonOf(pos.stopMode);
         if (this.mode === 'LIVE' && pos.exStop?.status === 'NEW') {
           // Binance holds the stop: give it time to fill, then fall back to a bot market close.
           pos.breachAt ||= now;
@@ -720,7 +751,7 @@ export class Engine {
 
   async placeExchangeStop(slot) {
     const pos = slot.position;
-    if (!this.exchangeStopsEnabled() || !pos?.stopPrice) return;
+    if (!this.exchangeStopsEnabled() || !pos?.stopPrice || pos.stopInvalid) return;
     if (pos.exStop && ['NEW', 'PLACING', 'UNKNOWN', 'TRIGGERED'].includes(pos.exStop.status)) return;
     const f = this.md.filters[slot.symbol];
     const tag = `${slot.strategy} ${slot.symbol.replace('USDT', '')}`;
@@ -787,7 +818,7 @@ export class Engine {
     const terminal = ['FILLED', 'CANCELED', 'EXPIRED', 'REJECTED', 'EXPIRED_IN_MATCH'].includes(r.status);
     if (!terminal) return 'WORKING';
     if (executed <= 0) return 'NONE';
-    const reason = pos.stopMode === 'FIXED_PERCENT' ? 'FIXED_STOP' : 'ATR_STOP';
+    const reason = stopReasonOf(pos.stopMode);
     const ms = this.ms('LIVE');
     const order = { id: ex.clientAlgoId, clientOrderId: ex.clientAlgoId, time: Date.now(), mode: 'LIVE', strategy: slot.strategy, symbol: slot.symbol, action: 'CLOSE', positionSide: pos.side, side: pos.side === 'LONG' ? 'SELL' : 'BUY', type: 'STOP_MARKET', refPrice: ex.triggerPrice, price: null, amount: round(executed * Number(r.avgPrice || ex.triggerPrice), 2), qty: executed, status: 'SUBMITTED', reason, exchangeOrderId: r.orderId, fee: null };
     ms.orders.unshift(order);
@@ -1001,12 +1032,13 @@ export class Engine {
         assetClass: meta.asset_class, marketType: meta.market_type, underlying: meta.underlying, session: meta.session,
         nativeHistory: meta.nativeHistory || 'FULL', unavailable: s.unavailable || null, signalCandles: s.daily.length,
         underlyingMarket: this.md.underlyingStatus ? this.md.underlyingStatus(sym) : null,
+        universe: this.universe && meta.asset_class === 'CRYPTO' ? { rank: this.universe.rows[sym]?.rank ?? null, quoteVolume: this.universe.rows[sym]?.quoteVolume ?? null, tradeAllowed: this.universe.isTradeAllowed(sym) } : null,
       };
     }
     const slots = [];
     for (const sym of SYMBOLS) for (const st of strategiesForSymbol(sym)) {
       const s = this.slot(st, sym);
-      slots.push({ strategy: st, symbol: sym, status: this.cfg.strategies[st].enabled ? s.status : (s.position ? s.status : 'OFF'), position: s.position, pending: s.pending, view: s.view, signal: s.signal, evalCandle: s.evalCandle, lastSignal: s.lastSignal, block: s.block, exitRule: STRATEGY_META[st].exitRule(this.cfg.strategies[st].params) });
+      slots.push({ strategy: st, symbol: sym, status: this.cfg.strategies[st].enabled ? s.status : (s.position ? s.status : 'OFF'), position: s.position, pending: s.pending, view: s.view, signal: s.signal, evalCandle: s.evalCandle, lastSignal: s.lastSignal, block: s.block, trendCount: s.trendCount || null, exitRule: STRATEGY_META[st].exitRule(this.cfg.strategies[st].params) });
     }
     return {
       ts: Date.now(), mode: this.mode, runState: this.runState,

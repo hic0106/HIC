@@ -6,11 +6,16 @@ import { mountAi } from './ai.js';
 const LC = window.LightweightCharts;
 const TZ = -new Date().getTimezoneOffset() * 60;
 const toT = (ms) => Math.floor(ms / 1000) + TZ;
-const SHORT = { TURTLE: '터틀', ADX: 'ADX', TSMOM: 'TSMOM', QQQ_EMA_TREND: 'QQQ EMA', QQQ_TSMOM: 'QQQ TSMOM', QQQ_SMA200: 'QQQ SMA200', QQQ_TURTLE_50_20: 'QQQ 터틀50/20' };
+const SHORT = { TURTLE: '터틀', ADX: 'ADX', TSMOM: 'TSMOM', RAYNER: 'Rayner', QQQ_EMA_TREND: 'QQQ EMA', QQQ_TSMOM: 'QQQ TSMOM', QQQ_SMA200: 'QQQ SMA200', QQQ_TURTLE_50_20: 'QQQ 터틀50/20' };
 const TFL = { '4h': '4시간', '1d': '1일', US_SESSION: '미국 정규장' };
 const SIDE = { LONG: '롱', SHORT: '숏' };
-const REASON = { STRATEGY_EXIT: '전략 청산', ATR_STOP: 'ATR 손절', FIXED_STOP: '고정 손절', TAKE_PROFIT: '익절' };
-const noteKo = (n) => n.replace(/^(\w+): indicators never ready in the period \(insufficient history for current parameters\)/, '$1: 과거 데이터가 부족해 기간 내 신호 계산 불가').replace(/^(\w+): first (\d+) candle\(s\) of the period without a signal \(indicator warm-up \/ limited history\)/, '$1: 기간 초반 $2개 캔들은 데이터 부족으로 신호 없음').replace('no candles in the test period', '기간 내 캔들 없음');
+const REASON = { STRATEGY_EXIT: '전략 청산', ATR_STOP: 'ATR 손절', FIXED_STOP: '고정 손절', TAKE_PROFIT: '익절', STRUCTURE_STOP: '구조 손절', RAYNER_HIST_TP: '히스토그램 목표 익절' };
+const noteKo = (n) => n.replace(/^(\w+): indicators never ready in the period \(insufficient history for current parameters\)/, '$1: 과거 데이터가 부족해 기간 내 신호 계산 불가').replace(/^(\w+): first (\d+) candle\(s\) of the period without a signal \(indicator warm-up \/ limited history\)/, '$1: 기간 초반 $2개 캔들은 데이터 부족으로 신호 없음').replace('no candles in the test period', '기간 내 캔들 없음')
+  .replace(/^HISTORICAL_QUOTE_VOLUME_WITHIN_WATCH_SET: new entries only for the top (\d+) of (\d+) watched symbols by (\d+)d quote volume before each (\d+)d rebalance/, '과거 거래대금 순위(현재 감시 $2종목 안에서): 리밸런싱($4일)마다 직전 $3일 거래대금 상위 $1개만 신규 진입')
+  .replace(/^(\d+) entry signal\(s\) skipped: symbol outside the historical trade universe at signal time/, '진입 신호 $1건 제외: 신호 시점 거래대금 진입 순위 밖')
+  .replace(/^(\d+) entry signal\(s\) skipped: all (\d+) slots in use/, '진입 신호 $1건 제외: 동시 보유 한도 $2개 도달')
+  .replace(/^(\d+) entry signal\(s\) cancelled: structure stop not beyond the fill price/, '진입 신호 $1건 취소: 구조 손절가가 체결가 반대편')
+  .replace(/^(\d+) entry signal\(s\) skipped: max entries per trend reached/, '진입 신호 $1건 제외: 추세당 최대 진입 횟수 도달');
 const won = (v) => (v == null || !Number.isFinite(v) ? '—' : `₩${fNum(v, 0)}`);
 const wonS = (v) => (v == null || !Number.isFinite(v) ? '—' : `${v > 0 ? '+' : v < 0 ? '−' : ''}₩${fNum(Math.abs(v), 0)}`);
 const pf = (v) => (v == null ? '—' : v === Infinity || v === 'Infinity' ? '∞' : fNum(v, 2));
@@ -79,7 +84,7 @@ function renderSummary() {
   const bhRet = (x) => { const b = x.benchmark; return b.length ? (b[b.length - 1].equity / x.capital - 1) * 100 : null; };
   const row = (x) => { const m = x.metrics; return `<tr data-st="${x.strategy}" class="${B.sel === x.strategy ? 'sel' : ''}">
     <td class="l"><i class="sw-dot" style="background:${ST_COLOR[x.strategy]}"></i><b>${SHORT[x.strategy]}</b>${x.enabled ? '' : ' <span class="muted">(꺼진 전략)</span>'}</td>
-    <td class="l">${TFL[x.timeframe]}</td><td class="l">${x.symbols.map((s) => s.replace('USDT', '')).join(' ')}</td>
+    <td class="l">${TFL[x.timeframe]}</td><td class="l" title="${esc(x.symbols.join(' '))}">${x.symbols.length > 4 ? `${x.symbols.length}종목${x.universe ? ` · 진입 상위 ${x.universe.tradeTopN}` : ''}` : x.symbols.map((s) => s.replace('USDT', '')).join(' ')}</td>
     <td>${won(m.finalEquity)}</td><td class="${cls(m.profit)}">${wonS(m.profit)}</td><td class="${cls(m.returnPct)}"><b>${fPct(m.returnPct)}</b></td>
     <td class="down">${m.maxDrawdownPct ? '−' + m.maxDrawdownPct.toFixed(2) + '%' : '0.00%'}</td><td>${m.trades}</td><td>${m.winRatePct != null ? m.winRatePct.toFixed(0) + '%' : '—'}</td>
     <td>${pf(m.profitFactor)}</td><td>${m.sharpe != null ? m.sharpe.toFixed(2) : '—'}</td><td class="down">${wonS(-x.fees)}</td><td class="${cls(x.funding)}">${wonS(x.funding)}</td>
@@ -105,7 +110,7 @@ function renderDetail() {
   const x = cur();
   const eq = x ? x.equity : r.portfolio.equity;
   const m = x ? x.metrics : r.portfolio.metrics;
-  $('#btEqTitle').textContent = x ? `${SHORT[x.strategy]} vs 단순 보유 (${x.symbols.map((s) => s.replace('USDT', '')).join('+')})` : '전체 전략 합산';
+  $('#btEqTitle').textContent = x ? `${SHORT[x.strategy]} vs 단순 보유 (${x.symbols.length > 4 ? `${x.symbols.length}종목 균등` : x.symbols.map((s) => s.replace('USDT', '')).join('+')})` : '전체 전략 합산';
   B.eqS.setData(dedup(eq.map((p) => ({ time: toT(p.t), value: p.equity }))));
   B.bhS.setData(x ? dedup(x.benchmark.map((p) => ({ time: toT(p.t), value: p.equity }))) : []);
   B.eqS.applyOptions({ color: x ? ST_COLOR[x.strategy] : '#f0b90b' });

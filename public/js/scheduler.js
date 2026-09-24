@@ -3,7 +3,7 @@ import { $, esc, fZone, fET, fDateTime } from './util.js';
 import { STATUS, TF, MODE, resultKo, detailKo } from './ko.js';
 
 const S = { signals: [], filter: { strategy: '', symbol: '', result: '' } };
-const SHORT = { TURTLE: '터틀', ADX: 'ADX', TSMOM: 'TSMOM', QQQ_EMA_TREND: 'QQQ EMA', QQQ_TSMOM: 'QQQ TSMOM', QQQ_SMA200: 'QQQ SMA200', QQQ_TURTLE_50_20: 'QQQ 터틀50/20' };
+const SHORT = { TURTLE: '터틀', ADX: 'ADX', TSMOM: 'TSMOM', RAYNER: 'Rayner', QQQ_EMA_TREND: 'QQQ EMA', QQQ_TSMOM: 'QQQ TSMOM', QQQ_SMA200: 'QQQ SMA200', QQQ_TURTLE_50_20: 'QQQ 터틀50/20' };
 
 const TRIG = (t = '') => t.replace('4H candle close', '4시간 캔들 마감').replace('1D candle close', '1일 캔들 마감').replace('US market close', '미국장 마감').replace('bot start', '봇 시작').replace('init', '프로그램 시작').replace('fallback (close event missed)', '보조 확인(마감 신호 누락)').replace('retry', '재시도').replace('config saved', '설정 저장');
 

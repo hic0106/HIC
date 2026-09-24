@@ -8,6 +8,9 @@ export const num = (v, { min = -Infinity, max = Infinity, int = false } = {}) =>
   return n;
 };
 
+// STRUCTURE (swing low / high stop) needs a strategy that reports sig.structStop (Rayner).
+export const stopModesFor = (name) => (STRATEGY_META[name]?.stopModes ? [...STRATEGY_META[name].stopModes, 'ATR_DYNAMIC', 'FIXED_PERCENT', 'OFF'] : ['ATR_DYNAMIC', 'FIXED_PERCENT', 'OFF']);
+
 // b = submitted settings, cur = current stored settings. Returns the validated next settings (throws on error).
 export function validateStrategySettings(name, b, cur) {
   const amt = (x) => num(x, { min: 0, max: 1e7 });
@@ -22,7 +25,7 @@ export function validateStrategySettings(name, b, cur) {
     },
     params: {},
     stop: {
-      mode: ['ATR_DYNAMIC', 'FIXED_PERCENT', 'OFF'].includes(b.stop.mode) ? b.stop.mode : (() => { throw new Error('bad stop mode'); })(),
+      mode: stopModesFor(name).includes(b.stop.mode) ? b.stop.mode : (() => { throw new Error('bad stop mode'); })(),
       atrPeriod: num(b.stop.atrPeriod, { min: 2, max: 200, int: true }),
       atrMult: num(b.stop.atrMult, { min: 0.1, max: 20 }),
       minPct: num(b.stop.minPct, { min: 0.1, max: 90 }),
@@ -36,6 +39,17 @@ export function validateStrategySettings(name, b, cur) {
   if (name === 'TURTLE') next.params = { entryPeriod: num(b.params.entryPeriod, P), exitPeriod: num(b.params.exitPeriod, P), smaFilter: num(b.params.smaFilter, P) };
   if (name === 'ADX') next.params = { adxPeriod: num(b.params.adxPeriod, P), threshold: num(b.params.threshold, { min: 1, max: 100 }), smaFilter: num(b.params.smaFilter, P) };
   if (name === 'TSMOM') next.params = { lookback: num(b.params.lookback, P) };
+  if (name === 'RAYNER') {
+    const q = b.params;
+    next.params = {
+      emaPeriod: num(q.emaPeriod, P), fastPeriod: num(q.fastPeriod, { min: 1, max: 200, int: true }), slowPeriod: num(q.slowPeriod, P),
+      signalPeriod: num(q.signalPeriod, { min: 1, max: 100, int: true }), slopeLookback: num(q.slopeLookback, { min: 1, max: 50, int: true }),
+      momentumLookback: num(q.momentumLookback, { min: 1, max: 20, int: true }), momentumMultiplier: num(q.momentumMultiplier, { min: 0.1, max: 10 }),
+      stopLookback: num(q.stopLookback, { min: 2, max: 200, int: true }), targetLookback: num(q.targetLookback, { min: 2, max: 400, int: true }),
+      maxEntriesPerTrend: num(q.maxEntriesPerTrend, { min: 1, max: 10, int: true }),
+    };
+    if (next.params.fastPeriod >= next.params.slowPeriod) throw new Error('MACD Fast must be < Slow');
+  }
   if (name === 'QQQ_EMA_TREND') {
     next.params = { fastEma: num(b.params.fastEma, P), slowEma: num(b.params.slowEma, P), sma200Filter: !!b.params.sma200Filter };
     if (next.params.fastEma >= next.params.slowEma) throw new Error('Fast EMA must be < Slow EMA');

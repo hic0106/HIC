@@ -14,8 +14,15 @@ const DAILY_HISTORY = 500;
 // Intraday closed-candle series kept for strategies (Turtle / ADX on 4h). 1000 x 4h ≈ 166 days (SMA200 warm-up).
 const STRATEGY_BARS = { '4h': 1000 };
 
-const toCandle = (a) => ({ t: a[0], o: +a[1], h: +a[2], l: +a[3], c: +a[4], v: +a[5], T: a[6] });
-const wsCandle = (k) => ({ t: k.t, o: +k.o, h: +k.h, l: +k.l, c: +k.c, v: +k.v, T: k.T });
+// v = base asset volume, qv = quote asset volume (USDT turnover: REST index 7, ws field "q")
+export const toCandle = (a) => ({ t: a[0], o: +a[1], h: +a[2], l: +a[3], c: +a[4], v: +a[5], T: a[6], qv: a[7] != null ? +a[7] : null });
+const wsCandle = (k) => ({ t: k.t, o: +k.o, h: +k.h, l: +k.l, c: +k.c, v: +k.v, T: k.T, qv: k.q != null ? +k.q : null });
+
+// Streams per watched symbol. Every watched symbol currently gets all chart intervals + ticker + mark + depth
+// (Top 20 ≈ 150 market streams on one connection; Binance allows 1024).
+// TODO(load): strategies only need 4h / 1d klines + ticker + markPrice for every watched symbol; 5m/15m/1h klines and
+// depth could be subscribed for the symbol selected in the UI only (would need runtime SUBSCRIBE / UNSUBSCRIBE).
+export const STRATEGY_STREAM_INTERVALS = ['4h', '1d'];
 
 export class MarketData extends EventEmitter {
   constructor(symbols, logger, { getCalendar } = {}) {
@@ -50,7 +57,11 @@ export class MarketData extends EventEmitter {
   async start() {
     await this.loadExchangeInfo();
     for (const sym of this.symbols) {
-      if (!this.s[sym].session) { await this.loadDaily(sym); await this.loadBars(sym); continue; }
+      if (!this.s[sym].session) {
+        // a watched (e.g. protected) crypto symbol that no longer exists on Binance must not block the others
+        if (!this.filters[sym]) { this.markUnavailable(sym, 'symbol not found in Binance exchangeInfo'); continue; }
+        await this.loadDaily(sym); await this.loadBars(sym); continue;
+      }
       // TradFi symbols are isolated: a failure never blocks crypto trading
       if (!this.filters[sym]) { this.markUnavailable(sym, 'symbol not found in Binance exchangeInfo'); continue; }
       try { await this.loadSession(sym); } catch (e) { this.markUnavailable(sym, `session history load failed: ${e.message}`); }
@@ -71,7 +82,7 @@ export class MarketData extends EventEmitter {
     for (const s of info.symbols) {
       if (this.symbols.includes(s.symbol)) this.filters[s.symbol] = parseSymbolFilters(s);
     }
-    this.log.info(`Exchange info loaded: ${Object.values(this.filters).map((f) => `${f.symbol} step=${f.stepSize} minNotional=${f.minNotional} ${f.status}`).join(', ')}`);
+    this.log.info(`Exchange info loaded (${Object.keys(this.filters).length} symbols): ${Object.values(this.filters).map((f) => `${f.symbol} step=${f.stepSize} minNotional=${f.minNotional} ${f.status}`).join(', ')}`);
   }
 
   markUnavailable(sym, reason) {

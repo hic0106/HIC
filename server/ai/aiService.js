@@ -108,6 +108,7 @@ const EDITABLE = {
   TURTLE: 'params.entryPeriod(5-100), params.exitPeriod(3-60), params.smaFilter(50-300), timeframe(4h|1d), shortEnabled',
   ADX: 'params.adxPeriod(7-30), params.threshold(15-40), params.smaFilter(50-300), timeframe(4h|1d), shortEnabled',
   TSMOM: 'params.lookback(10-120), timeframe(4h|1d)',
+  RAYNER: 'params.emaPeriod(20-200), params.slowPeriod(20-200), params.signalPeriod(3-20), params.slopeLookback(1-10), params.momentumLookback(1-6), params.momentumMultiplier(1-3), params.stopLookback(5-30), params.targetLookback(10-60), params.maxEntriesPerTrend(1-4), timeframe(4h|1d), shortEnabled, stop.mode(STRUCTURE 권장)',
   QQQ_EMA_TREND: 'params.fastEma, params.slowEma, params.sma200Filter', QQQ_TSMOM: 'params.lookback(63|126|189|252), params.sma200Filter',
   QQQ_SMA200: 'params.smaPeriod', QQQ_TURTLE_50_20: 'params.entryPeriod, params.exitPeriod',
 };

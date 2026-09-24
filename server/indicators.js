@@ -117,3 +117,38 @@ export function ema(values, period) {
   }
   return out;
 }
+
+// EMA over a series that starts with nulls (e.g. a MACD line): seeded on the first `period` valid values.
+export function emaSparse(values, period) {
+  const out = new Array(values.length).fill(null);
+  const first = values.findIndex((x) => x != null && Number.isFinite(x));
+  if (first < 0) return out;
+  const seg = ema(values.slice(first), period);
+  for (let i = 0; i < seg.length; i++) out[first + i] = seg[i];
+  return out;
+}
+
+// MACD: line = EMA(fast) - EMA(slow), signal = EMA(line, signalPeriod), histogram = line - signal.
+// fast = 1 -> EMA(close, 1) = close (k = 1).
+export function macd(values, fast, slow, signalPeriod) {
+  const ef = ema(values, fast), es = ema(values, slow);
+  const line = values.map((_, i) => (ef[i] == null || es[i] == null ? null : ef[i] - es[i]));
+  const signal = emaSparse(line, signalPeriod);
+  const hist = line.map((m, i) => (m == null || signal[i] == null ? null : m - signal[i]));
+  return { macd: line, signal, hist };
+}
+
+// Lowest low / highest high of the `period` candles ENDING at index i (current candle included).
+export function lowestLow(candles, i, period) {
+  if (i - period + 1 < 0) return null;
+  let m = Infinity;
+  for (let j = i - period + 1; j <= i; j++) m = Math.min(m, candles[j].l);
+  return m;
+}
+
+export function highestHigh(candles, i, period) {
+  if (i - period + 1 < 0) return null;
+  let m = -Infinity;
+  for (let j = i - period + 1; j <= i; j++) m = Math.max(m, candles[j].h);
+  return m;
+}

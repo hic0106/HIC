@@ -11,7 +11,7 @@ export const TF_MS = { '4h': 4 * 3600_000, '1d': 86_400_000 };
 export const TF_LABEL = { '4h': '4H', '1d': '1D', [US_SESSION]: 'US SESSION' };
 
 export const DEFAULT_TIMEFRAME = {
-  TURTLE: '4h', ADX: '4h', TSMOM: '1d',
+  TURTLE: '4h', ADX: '4h', TSMOM: '1d', RAYNER: '4h',
   QQQ_EMA_TREND: US_SESSION, QQQ_TSMOM: US_SESSION, QQQ_SMA200: US_SESSION, QQQ_TURTLE_50_20: US_SESSION,
 };
 

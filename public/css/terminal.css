@@ -181,7 +181,7 @@ input:focus, select:focus { outline: none; border-color: var(--info); }
 .lg.ERROR { background: rgba(246, 70, 93, .05); }
 
 /* strategies settings */
-.set-grid { display: grid; grid-template-columns: repeat(3, minmax(290px, 1fr)) minmax(290px, 1fr); min-width: 1200px; }
+.set-grid { display: grid; grid-template-columns: repeat(4, minmax(290px, 1fr)) minmax(290px, 1fr); min-width: 1500px; }
 .set-col { border-right: 1px solid var(--line); padding-bottom: 8px; }
 .set-col:last-child { border-right: 0; background: #10141a; }
 .set-h { display: flex; justify-content: space-between; align-items: center; padding: 6px 10px; border-bottom: 1px solid var(--line); background: var(--panel2); position: sticky; top: 0; z-index: 2; }
@@ -251,6 +251,7 @@ input:focus, select:focus { outline: none; border-color: var(--info); }
 /* multi-asset */
 .wl-group { font: 700 9.5px var(--sans); letter-spacing: 1.2px; color: var(--mute); padding: 5px 10px 3px; background: var(--panel2); border-bottom: 1px solid var(--line); }
 .wl-strats.four { grid-template-columns: repeat(4, 1fr); }
+.wl-rank { font: 600 9.5px var(--mono); color: var(--dim); margin-right: 4px; }
 .t tr.grp td { color: var(--dim); font: 700 9.5px var(--sans); letter-spacing: 1px; background: var(--panel2); }
 .set-row-h { font: 700 10px var(--sans); letter-spacing: 1px; color: var(--warn); padding: 6px 10px; background: #1a1708; border-bottom: 1px solid var(--line); border-top: 1px solid var(--line); }
 .set-grid.four { grid-template-columns: repeat(4, minmax(290px, 1fr)); }

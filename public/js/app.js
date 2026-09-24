@@ -9,8 +9,8 @@ import { mountPortfolio, update as updatePortfolio } from './portfolio.js';
 import { mountBacktest } from './backtest.js';
 import { SIDE, MODE, STATUS, EXIT, ORDER_STATUS, STRAT, sigKo } from './ko.js';
 
-const SHORT = { TURTLE: '터틀', ADX: 'ADX', TSMOM: 'TSMOM', QQQ_EMA_TREND: 'QQQ EMA 추세', QQQ_TSMOM: 'QQQ TSMOM', QQQ_SMA200: 'QQQ SMA200', QQQ_TURTLE_50_20: 'QQQ 터틀 50/20' };
-const CHIP = { TURTLE: '터틀', ADX: 'ADX', TSMOM: 'TSMOM', QQQ_EMA_TREND: 'EMA', QQQ_TSMOM: 'TSM', QQQ_SMA200: 'SMA', QQQ_TURTLE_50_20: 'T50' };
+const SHORT = { TURTLE: '터틀', ADX: 'ADX', TSMOM: 'TSMOM', RAYNER: 'Rayner', QQQ_EMA_TREND: 'QQQ EMA 추세', QQQ_TSMOM: 'QQQ TSMOM', QQQ_SMA200: 'QQQ SMA200', QQQ_TURTLE_50_20: 'QQQ 터틀 50/20' };
+const CHIP = { TURTLE: '터틀', ADX: 'ADX', TSMOM: 'TSM', RAYNER: 'RAY', QQQ_EMA_TREND: 'EMA', QQQ_TSMOM: 'TSM', QQQ_SMA200: 'SMA', QQQ_TURTLE_50_20: 'T50' };
 const stratsOf = (sym) => S.meta.strategiesBySymbol[sym] || [];
 const classOf = (sym) => S.meta.symbolMeta[sym]?.asset_class || 'CRYPTO';
 const isLongOnly = (st) => !S.meta.supportsShort[st];
@@ -285,10 +285,12 @@ function wlRow(s, sym) {
       return `<div class="st-chip"><i>${CHIP[st]}</i><span class="st-${k}">${label}</span></div>`;
     }).join('');
     const um = m.underlyingMarket;
+    const uv = m.universe;
     const sub = m.unavailable ? '<span class="tag SHORT" title="' + esc(m.unavailable) + '">사용 불가</span>'
+      : uv && !uv.tradeAllowed ? '<span class="tag WAIT" title="거래대금 진입 순위 밖: 신규 진입 없음, 보유 포지션·손절·청산은 계속 관리">감시만</span>'
       : um ? `<span class="tag ${um.underlying === 'OPEN' ? 'LONG' : 'WAIT'}" title="미국 정규장 상태">미국장 ${um.underlying === 'OPEN' ? '개장' : '폐장'}</span>` : '';
     return `<div class="wl-row ${sym === S.sel ? 'sel' : ''}" data-sym="${sym}">
-      <div class="wl-top"><span class="wl-sym">${sym.replace('USDT', '')}<small>USDT</small></span><span class="wl-px ${cls(t?.changePct)}">${fPrice(m.price, f)}</span></div>
+      <div class="wl-top"><span class="wl-sym">${uv ? `<span class="wl-rank" title="24시간 거래대금 순위${uv.quoteVolume != null ? ` · ${fNum(uv.quoteVolume / 1e6, 0)}M USDT` : ''}">#${uv.rank ?? '-'}</span>` : ''}${sym.replace('USDT', '')}<small>USDT</small></span><span class="wl-px ${cls(t?.changePct)}">${fPrice(m.price, f)}</span></div>
       <div class="wl-mid"><span><span class="tag ${netTag}">${netKo}</span> ${sub}</span><span class="${cls(t?.changePct)}">${t ? fPct(t.changePct) : '—'}</span></div>
       <div class="wl-strats ${stratsOf(sym).length > 3 ? 'four' : ''}">${chips}</div></div>`;
 }
@@ -328,6 +330,7 @@ function renderRight(s) {
     ['투자 규모 롱 / 숏', `<span class="up">${fNum(e.long, 0)}</span> / <span class="down">${fNum(e.short, 0)}</span>`],
     ['순 노출', `<span class="${cls(e.net)}">${fSigned(e.net, 0)}</span> · 손익 <span class="${cls(e.pnl)}">${fSigned(e.pnl)}</span>`],
     ['최소 주문액 / 수량 단위', f ? `${f.minNotional} / ${f.stepSize}` : '—'],
+    ...(m.universe ? [['거래대금 순위', `#${m.universe.rank ?? '-'} · ${m.universe.tradeAllowed ? '<span class="up">신규진입 가능</span>' : '<span class="warn">감시만 (신규진입 안 함)</span>'}`]] : []),
     ...(m.underlyingMarket ? [
       ['자산 종류', `미국 지수 <span class="muted">${esc(m.underlying)}</span>`],
       ['미국 정규장', `<span class="${m.underlyingMarket.underlying === 'OPEN' ? 'up' : 'muted'}">${m.underlyingMarket.underlying === 'OPEN' ? '개장' : '폐장'}</span> <span class="muted">${m.underlyingMarket.underlying === 'OPEN' ? fTime(m.underlyingMarket.closesAt) + ' 마감' : m.underlyingMarket.nextOpen ? fDateTime(m.underlyingMarket.nextOpen) + ' 개장' : ''}</span>`],
@@ -376,6 +379,16 @@ function stratCard(s, st, sym, f) {
     add('SMA200', fPrice(v.sma, f), v.sma && s.symbols[sym].price < v.sma ? 'down' : 'up');
   } else if (st === 'TSMOM') {
     add('30일 모멘텀', v.momentumPct != null ? fPct(v.momentumPct) : '—', cls(v.momentumPct));
+  } else if (st === 'RAYNER') {
+    const pp = cfg.params;
+    const hd = (x) => (x == null ? '—' : Math.abs(x) >= 1 ? fNum(x, 3) : Number(x).toPrecision(4));
+    add(`EMA${pp.emaPeriod}`, fPrice(v.ema, f), v.ema && s.symbols[sym].price < v.ema ? 'down' : 'up');
+    add('MACD 히스토그램', hd(v.hist), cls(v.hist));
+    // with a position: the target fixed at entry (never updated), otherwise the current 25-bar extreme
+    add(`롱 히스토그램 목표${p?.side === 'LONG' ? ' (진입 고정)' : ''}`, hd(p?.side === 'LONG' && p.histTarget != null ? p.histTarget : v.longTarget));
+    add(`숏 히스토그램 목표${p?.side === 'SHORT' ? ' (진입 고정)' : ''}`, hd(p?.side === 'SHORT' && p.histTarget != null ? p.histTarget : v.shortTarget));
+    add('추세 내 진입 (롱/숏)', `${sl.trendCount?.LONG ?? 0} / ${sl.trendCount?.SHORT ?? 0} (최대 ${pp.maxEntriesPerTrend})`);
+    if (!p) add('구조 손절 (롱/숏)', `${fPrice(v.longStop, f)} / ${fPrice(v.shortStop, f)}`);
   } else if (st === 'QQQ_EMA_TREND') {
     add(`EMA${cfg.params.fastEma}`, fPrice(v.fastEma, f), v.fastEma > v.slowEma ? 'up' : 'down');
     add(`EMA${cfg.params.slowEma}`, fPrice(v.slowEma, f));

@@ -10,12 +10,20 @@ const DAY = Number(process.env.MOCK_DAY_MS || 86_400_000);
 const F = DAY / 86_400_000;
 const INTERVALS = { '5m': 300_000 * F, '15m': 900_000 * F, '30m': 1_800_000 * F, '1h': 3_600_000 * F, '4h': 14_400_000 * F, '1d': DAY };
 const QQQ_MS = { '5m': 300_000, '15m': 900_000, '30m': 1_800_000, '1h': 3_600_000, '4h': 14_400_000 };
+// qv = synthetic 24h quote volume (USDT) for the universe ranking; listedDays = days since onboardDate
 const SYMS = {
-  BTCUSDT: { p: 86000, vol: 0.03, step: '0.001', minQty: '0.001', minNotional: '100', tick: '0.10' },
-  ETHUSDT: { p: 3200, vol: 0.035, step: '0.001', minQty: '0.001', minNotional: '20', tick: '0.01' },
-  XRPUSDT: { p: 2.4, vol: 0.045, step: '0.1', minQty: '0.1', minNotional: '5', tick: '0.0001' },
+  BTCUSDT: { p: 86000, vol: 0.03, step: '0.001', minQty: '0.001', minNotional: '100', tick: '0.10', qv: 9e9 },
+  ETHUSDT: { p: 3200, vol: 0.035, step: '0.001', minQty: '0.001', minNotional: '20', tick: '0.01', qv: 6e9 },
+  SOLUSDT: { p: 150, vol: 0.05, step: '0.01', minQty: '0.01', minNotional: '5', tick: '0.01', qv: 3e9 },
+  XRPUSDT: { p: 2.4, vol: 0.045, step: '0.1', minQty: '0.1', minNotional: '5', tick: '0.0001', qv: 2e9 },
+  DOGEUSDT: { p: 0.2, vol: 0.06, step: '1', minQty: '1', minNotional: '5', tick: '0.00001', qv: 1.5e9 },
+  BNBUSDT: { p: 600, vol: 0.03, step: '0.01', minQty: '0.01', minNotional: '5', tick: '0.01', qv: 8e8 },
+  ADAUSDT: { p: 0.7, vol: 0.05, step: '1', minQty: '1', minNotional: '5', tick: '0.0001', qv: 5e8 },
+  // excluded by the universe filter: stablecoin base, new listing
+  USDCUSDT: { p: 1, vol: 0.0005, step: '1', minQty: '1', minNotional: '5', tick: '0.0001', qv: 7e9 },
+  NEWUSDT: { p: 1.5, vol: 0.08, step: '1', minQty: '1', minNotional: '5', tick: '0.0001', qv: 4e9, listedDays: 20 },
   // TradFi index perpetual (listed 2026-04-06); deterministic 30m path so history pages are consistent
-  QQQUSDT: { p: 600, vol: 0.012, step: '0.01', minQty: '0.01', minNotional: '5', tick: '0.01', tradfi: true },
+  QQQUSDT: { p: 600, vol: 0.012, step: '0.01', minQty: '0.01', minNotional: '5', tick: '0.01', tradfi: true, qv: 1e8 },
 };
 const QQQ_LISTED = Date.UTC(2026, 3, 6);
 const qqqPrice = (t) => {
@@ -24,7 +32,8 @@ const qqqPrice = (t) => {
 };
 const qqqBar = (t, ms) => {
   const o = qqqPrice(t), c = qqqPrice(t + ms);
-  return [t, o, Math.max(o, c) * 1.0008, Math.min(o, c) * 0.9992, c, 50 + (t / ms) % 40, t + ms - 1];
+  const v = 50 + (t / ms) % 40;
+  return [t, o, Math.max(o, c) * 1.0008, Math.min(o, c) * 0.9992, c, v, t + ms - 1, v * (o + c) / 2];
 };
 
 let seed = 42;
@@ -44,7 +53,8 @@ for (const [s, c] of Object.entries(SYMS)) {
     const cl = o * Math.exp(drift + c.vol * gauss());
     const h = Math.max(o, cl) * (1 + Math.abs(gauss()) * c.vol * 0.4);
     const l = Math.min(o, cl) * (1 - Math.abs(gauss()) * c.vol * 0.4);
-    arr.push({ t: dayStart - d * DAY, o, h, l, c: cl, v: 1000 + rnd() * 5000 });
+    const v = (c.qv / c.p) * (0.6 + rnd() * 0.8); // base volume so that quote volume ≈ c.qv per day
+    arr.push({ t: dayStart - d * DAY, o, h, l, c: cl, v });
     p = cl;
   }
   hist[s] = { daily: arr, price: p, forming: { t: dayStart, o: p, h: p, l: p, c: p, v: 0 }, funding: 0.0001, nextFunding: Math.ceil(now0 / (DAY / 3)) * (DAY / 3) };
@@ -64,7 +74,7 @@ function klines(sym, interval, limit, startTime) {
   const all = [...h.daily, h.forming];
   if (interval === '1d') {
     const rows = startTime ? all.filter((k) => k.t >= startTime).slice(0, limit) : all.slice(-limit);
-    return rows.map((k) => [k.t, k.o, k.h, k.l, k.c, k.v, k.t + DAY - 1]);
+    return rows.map((k) => [k.t, k.o, k.h, k.l, k.c, k.v, k.t + DAY - 1, k.v * (k.o + k.c) / 2]);
   }
   // Intraday synthetic, deterministic: path inside each daily candle (consistent across paged requests)
   const end = Math.floor(Date.now() / ms) * ms;
@@ -79,13 +89,14 @@ function klines(sym, interval, limit, startTime) {
   const out = [];
   for (let t = t0; t <= end && out.length < limit; t += ms) {
     const o = at(t), c = t + ms > Date.now() ? h.price : at(t + ms);
-    out.push([t, o, Math.max(o, c) * 1.002, Math.min(o, c) * 0.998, c, 10 + ((t / ms) % 90), t + ms - 1]);
+    const v = 10 + ((t / ms) % 90);
+    out.push([t, o, Math.max(o, c) * 1.002, Math.min(o, c) * 0.998, c, v, t + ms - 1, v * (o + c) / 2]);
   }
   return out;
 }
 
 // ---- simulated account (hedge mode)
-const acct = { wallet: 5000, dual: true, leverage: { BTCUSDT: 1, ETHUSDT: 1, XRPUSDT: 1 }, positions: {}, orders: {} };
+const acct = { wallet: 5000, dual: true, leverage: Object.fromEntries(Object.keys(SYMS).map((s) => [s, 1])), positions: {}, orders: {} };
 const posKey = (s, side) => `${s}:${side}`;
 function unreal() {
   let u = 0;
@@ -103,12 +114,19 @@ const server = http.createServer((req, res) => {
   const u = new URL(req.url, `http://${req.headers.host}`);
   const q = Object.fromEntries(u.searchParams);
   const p = u.pathname;
-  const priv = !['/fapi/v1/time', '/fapi/v1/exchangeInfo', '/fapi/v1/klines', '/fapi/v1/fundingRate'].includes(p) && !p.startsWith('/mock/');
+  const priv = !['/fapi/v1/time', '/fapi/v1/exchangeInfo', '/fapi/v1/klines', '/fapi/v1/fundingRate', '/fapi/v1/ticker/24hr'].includes(p) && !p.startsWith('/mock/');
   if (priv && !req.headers['x-mbx-apikey']) return json(res, 401, { code: -2015, msg: 'Invalid API-key' });
   if (p === '/fapi/v1/time') return json(res, 200, { serverTime: Date.now() });
   if (p === '/fapi/v1/exchangeInfo') {
     return json(res, 200, { symbols: Object.entries(SYMS).map(([s, c]) => ({ symbol: s, status: 'TRADING', contractType: c.tradfi ? 'TRADIFI_PERPETUAL' : 'PERPETUAL', quantityPrecision: 3, pricePrecision: 2,
+      baseAsset: s.replace(/USDT$/, ''), quoteAsset: 'USDT', marginAsset: 'USDT', underlyingType: c.tradfi ? 'EQUITY' : 'COIN',
+      onboardDate: Date.now() - (c.listedDays ?? 1500) * 86_400_000,
       filters: [{ filterType: 'PRICE_FILTER', tickSize: c.tick }, { filterType: 'LOT_SIZE', stepSize: c.step, minQty: c.minQty, maxQty: '1000000' }, { filterType: 'MARKET_LOT_SIZE', stepSize: c.step, minQty: c.minQty, maxQty: '100000' }, { filterType: 'MIN_NOTIONAL', notional: c.minNotional }] })) });
+  }
+  if (p === '/fapi/v1/ticker/24hr') {
+    const row = (s) => ({ symbol: s, lastPrice: String(hist[s].price), volume: String(SYMS[s].qv / hist[s].price), quoteVolume: String(SYMS[s].qv), closeTime: Date.now() });
+    if (q.symbol) return SYMS[q.symbol] ? json(res, 200, row(q.symbol)) : json(res, 400, { code: -1121, msg: 'Invalid symbol.' });
+    return json(res, 200, Object.keys(SYMS).map(row));
   }
   if (p === '/fapi/v1/fundingRate') {
     const st = Number(q.startTime || Date.now() - 30 * 86_400_000), et = Number(q.endTime || Date.now()), step = 8 * 3_600_000;
@@ -277,7 +295,7 @@ function pushUserData(q, px, qty, fee) {
 }
 
 function klineMsg(s, i, k, x, ms = DAY) {
-  return { e: 'kline', s, k: { t: k.t, T: k.t + ms - 1, s, i, o: String(k.o), c: String(k.c), h: String(k.h), l: String(k.l), v: String(k.v), x } };
+  return { e: 'kline', s, k: { t: k.t, T: k.t + ms - 1, s, i, o: String(k.o), c: String(k.c), h: String(k.h), l: String(k.l), v: String(k.v), q: String(k.v * k.c), x } };
 }
 function broadcast(route, stream, data) {
   const msg = JSON.stringify({ stream, data });

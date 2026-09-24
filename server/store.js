@@ -8,6 +8,7 @@ fs.mkdirSync(path.join(DATA_DIR, 'logs'), { recursive: true });
 
 import { SYMBOLS } from './assets.js';
 import { DEFAULT_US_CALENDAR } from './session.js';
+import { DEFAULT_UNIVERSE } from './universeDefaults.js';
 
 export { SYMBOLS };
 
@@ -31,6 +32,9 @@ export const DEFAULT_CONFIG = {
     // (restart / late start). Exits are always executed. Stops never depend on this.
     scheduler: { entryGraceMin: { '4h': 30, '1d': 120, US_SESSION: 120 }, retrySec: 15 },
   },
+  // Crypto universe (server/universe.js): Binance USDⓈ-M perpetuals ranked by 24h quoteVolume.
+  // watch = top watchTopN (+ symbols with positions / orders / stops), new entries only for the top tradeTopN.
+  cryptoUniverse: structuredClone(DEFAULT_UNIVERSE),
   // Self-Improving Controller (V1). Only scales base order amounts of NEW entries by a bounded multiplier.
   controller: {
     mode: 'OBSERVE', // OFF | OBSERVE | PAPER_AUTO | LIVE_APPROVAL
@@ -56,7 +60,7 @@ export const DEFAULT_CONFIG = {
     boostRegimes: { LONG: ['BULL_TREND', 'NORMAL'], SHORT: ['BEAR_TREND'] },
     // optional hard maximum USDT per order (null = none)
     maxOrderUsdt: {
-      TURTLE: { LONG: null, SHORT: null }, ADX: { LONG: null, SHORT: null }, TSMOM: { LONG: null, SHORT: null },
+      TURTLE: { LONG: null, SHORT: null }, ADX: { LONG: null, SHORT: null }, TSMOM: { LONG: null, SHORT: null }, RAYNER: { LONG: null, SHORT: null },
       QQQ_EMA_TREND: { LONG: null, SHORT: null }, QQQ_TSMOM: { LONG: null, SHORT: null }, QQQ_SMA200: { LONG: null, SHORT: null }, QQQ_TURTLE_50_20: { LONG: null, SHORT: null },
     },
   },
@@ -87,6 +91,23 @@ export const DEFAULT_CONFIG = {
       params: { lookback: 30 },
       stop: { mode: 'ATR_DYNAMIC', atrPeriod: 20, atrMult: 3.0, minPct: 10, maxPct: 22, fixedPct: 15 },
       takeProfit: { enabled: false, pct: 40 },
+    },
+    // Rayner: EMA50 trend + MACD(1,50,9) histogram acceleration, structure stop, histogram target exit.
+    // Off by default (backtest validation first).
+    RAYNER: {
+      enabled: false,
+      timeframe: '4h',
+      shortEnabled: true,
+      leverage: 1, amounts: amounts(200, 100),
+      params: {
+        emaPeriod: 50, fastPeriod: 1, slowPeriod: 50, signalPeriod: 9,
+        slopeLookback: 3, momentumLookback: 3, momentumMultiplier: 1.5,
+        stopLookback: 10, targetLookback: 25, maxEntriesPerTrend: 2,
+      },
+      // STRUCTURE: lowest low / highest high of the last stopLookback closed candles at the signal candle, fixed after entry.
+      // atr*/min/max/fixed fields are kept for schema compatibility (used only if the mode is switched).
+      stop: { mode: 'STRUCTURE', atrPeriod: 14, atrMult: 2.0, minPct: 2, maxPct: 20, fixedPct: 8 },
+      takeProfit: { enabled: false, pct: 30 },
     },
     // ---- TRADFI (QQQUSDT): LONG / CASH only, signals on US regular-session closes
     QQQ_EMA_TREND: {
@@ -160,7 +181,7 @@ const F = {
 
 export class Store {
   constructor() {
-    this.config = deepMerge(DEFAULT_CONFIG, readJson(F.config, {}));
+    this.config = deepMerge(structuredClone(DEFAULT_CONFIG), readJson(F.config, {})); // clone: edits must never leak into the defaults
     // removed settings: leverage is per strategy now, LIVE base capital = current account equity
     for (const k of ['leverage', 'leverageTradfi', 'liveBaseCapital']) delete this.config.general[k];
     const st = readJson(F.state, {});

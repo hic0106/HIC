@@ -10,7 +10,8 @@ import { symbolsOfClass } from '../assets.js';
 export const IND_TYPES = ['SMA', 'EMA', 'RSI', 'ATR', 'ADX', 'PLUS_DI', 'MINUS_DI', 'HIGHEST', 'LOWEST', 'MOMENTUM_PCT'];
 export const PRICE_REFS = ['close', 'open', 'high', 'low', 'volume'];
 export const OPS = ['>', '<', '>=', '<=', 'crossAbove', 'crossBelow'];
-export const DSL_SYMBOLS = symbolsOfClass('CRYPTO'); // QQQ has too little history for new strategies
+// current crypto watch set (dynamic universe, resolved at call time); QQQ has too little history for new strategies
+export const dslSymbols = () => symbolsOfClass('CRYPTO');
 const SOURCES = ['close', 'open', 'high', 'low'];
 const FIELD = { close: 'c', open: 'o', high: 'h', low: 'l', volume: 'v' }; // candle object keys
 
@@ -36,7 +37,7 @@ export const STRATEGY_SCHEMA = {
     description: { type: 'string', description: 'Korean, 1-3 sentences: entry / exit rules in plain words' },
     rationale: { type: 'string', description: 'Korean: why this should work and when it will fail' },
     timeframe: { type: 'string', enum: ['4h', '1d'] },
-    symbols: { type: 'array', items: { type: 'string', enum: DSL_SYMBOLS } },
+    symbols: { type: 'array', items: { type: 'string', get enum() { return dslSymbols(); } } },
     indicators: {
       type: 'array',
       items: { type: 'object', additionalProperties: false, required: ['id', 'type', 'period', 'source'], properties: {
@@ -61,7 +62,8 @@ export function validateDsl(d) {
   if (err.length) throw new Error(err.join('; '));
   const name = String(d.name || 'AI_STRATEGY').replace(/[^A-Za-z0-9_]/g, '_').slice(0, 32) || 'AI_STRATEGY';
   need(['4h', '1d'].includes(d.timeframe), 'timeframe must be 4h or 1d');
-  const symbols = [...new Set((d.symbols || []).filter((s) => DSL_SYMBOLS.includes(s)))];
+  const allowed = dslSymbols();
+  const symbols = [...new Set((d.symbols || []).filter((s) => allowed.includes(s)))];
   need(symbols.length > 0, 'at least one symbol');
   const ids = new Set();
   const indicators = (d.indicators || []).slice(0, 12).map((x) => {

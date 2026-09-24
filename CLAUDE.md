@@ -8,7 +8,7 @@
 - 저장소: `hic0106/HIC`, 작업 브랜치: `claude/binance-crypto-trading-terminal-xspxvw` (여기에만 commit/push, PR은 요청 시에만).
 - 스택: Node 22 ESM, Express 5, ws, lightweight-charts v5, @anthropic-ai/sdk 0.128.0. 빌드 단계 없음.
 - 실행: `start.bat`(Windows, npm install 후 서버 실행) 또는 `npm start` → http://localhost:8420 (`PORT` 환경변수로 변경 가능)
-- 테스트: `npm test` (현재 91개 전부 통과). 가짜 서버: `npm run mock`, `npm run dev:mock`(data-mock/ 사용), `npm run mock:claude` + `ANTHROPIC_BASE_URL=http://127.0.0.1:9902`.
+- 테스트: `npm test` (현재 112개 전부 통과). 가짜 서버: `npm run mock`, `npm run dev:mock`(data-mock/ 사용), `npm run mock:claude` + `ANTHROPIC_BASE_URL=http://127.0.0.1:9902`.
 - 자세한 사용법/구조: `README.md`.
 
 ## 사용자 선호
@@ -31,14 +31,18 @@
 
 | 전략 | 종목 | 캔들 | 비고 |
 |---|---|---|---|
-| TURTLE | BTC/ETH/XRP | 4h | 20/10 채널, SMA200 필터, 숏 허용 |
-| ADX | BTC/ETH/XRP | 4h | ADX14 > 25, SMA200 필터, 숏 허용 |
-| TSMOM | BTC/ETH/XRP | 1d | lookback 30, 롱만 |
+| TURTLE | 코인 Universe | 4h | 20/10 채널, SMA200 필터, 숏 허용 |
+| ADX | 코인 Universe | 4h | ADX14 > 25, SMA200 필터, 숏 허용 |
+| TSMOM | 코인 Universe | 1d | lookback 30, 롱만 |
+| RAYNER (기본 OFF) | 코인 Universe | 4h | EMA50 + MACD(1,50,9) 히스토그램 가속, STRUCTURE 손절(최근 10봉), 히스토그램 목표 익절(진입 시 고정), 추세당 최대 2회 |
 | QQQ_EMA_TREND / QQQ_TSMOM (ON), QQQ_SMA200 / QQQ_TURTLE_50_20 (OFF) | QQQUSDT | 미국 정규장 세션 | 롱/현금만 |
 
 Stop은 ATR_DYNAMIC(min/max 클램프), LIVE에서는 Binance Algo STOP_MARKET로 등록. Take Profit은 봇이 감시.
 
 ## 구성 요소 요약
+
+- `server/universe.js`: 코인 Universe. 시작 시 거래대금(quoteVolume) 상위 20 감시 / 15 신규진입 + 보호 종목(포지션·주문·거래소 Stop) → `assets.registerCryptoSymbols()`로 `SYMBOLS`/`SYMBOL_META`(live 객체) 교체. 24h 재순위는 진입 허용만 갱신, 감시 목록 변경은 재시작 시. 엔진 `preTradeChecks`에서 `UNIVERSE_FILTER`.
+- `server/backtest/historicalUniverse.js`: 백테스트용 과거 거래대금 순위(감시 후보 안, 7일 리밸런싱, 직전 30일, 미래 데이터 미사용).
 
 - `server/engine.js`: 전략 평가, 주문 전 검사, PAPER/LIVE 실행, Stop, Funding, PnL.
 - `server/scheduler/strategyScheduler.js`: 캔들 마감 시 평가. `run()`은 단일 큐(`this.queue`)로 직렬화, 실제 작업은 `runNow()`.

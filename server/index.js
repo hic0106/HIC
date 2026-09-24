@@ -19,6 +19,8 @@ import { PortfolioService } from './portfolio/portfolioService.js';
 import { BacktestRunner } from './backtest/backtestRunner.js';
 import { validateStrategySettings, num } from './strategyConfig.js';
 import { AiService } from './ai/aiService.js';
+import { UniverseManager, universeConfig } from './universe.js';
+import { BinanceClient, endpoints } from './binance.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const HOST = process.env.HOST || '127.0.0.1';
@@ -26,8 +28,13 @@ const PORT = Number(process.env.PORT || 8420);
 
 const store = new Store();
 const log = new Logger(store);
+// Crypto universe first: the watch set (Top N by 24h quote volume + symbols with positions / orders / stops) is
+// registered into SYMBOLS before market data, engine, scheduler and controller are built.
+const universe = new UniverseManager({ store, rest: new BinanceClient({ restBase: endpoints(false).rest }), log });
+await universe.init();
 const md = new MarketData(SYMBOLS, log, { getCalendar: () => store.config.general.usCalendar });
 const engine = new Engine(store, md, log);
+engine.universe = universe;
 // Controller layer: strategies -> controller (size multiplier) -> existing execution engine
 const controller = new Controller({ store, md, engine, log });
 engine.controller = controller;
@@ -36,13 +43,14 @@ const signalLog = new SignalLog();
 const scheduler = new StrategyScheduler({ store, md, engine, log, signalLog });
 const portfolio = new PortfolioService({ store, engine, md, log });
 const risk = new RiskMonitor({ engine, md, log, portfolio });
-const backtest = new BacktestRunner({ store, md, log, rest: md.rest }); // public market data only, never places orders
+const backtest = new BacktestRunner({ store, md, log, rest: md.rest, universe }); // public market data only, never places orders
 const ai = new AiService({ store, backtest, controller, engine, log }); // Claude API: analysis / improvement proposals / strategy generation (never trades)
 const fullSnapshot = () => {
   const s = engine.snapshot();
   try { s.controller = controller.compact(); } catch (e) { s.controller = { mode: 'ERROR', error: e.message }; }
   try { s.scheduler = scheduler.snapshot(); } catch (e) { s.scheduler = []; log.warn(`scheduler snapshot: ${e.message}`); }
   try { s.risk = risk.status(); } catch { s.risk = null; }
+  try { s.universe = universe.snapshot(); } catch { s.universe = null; }
   try { const r = portfolio.recon; s.reconciliation = { ok: r.ok, warnings: r.warnings, na: r.na || null }; } catch { s.reconciliation = null; }
   return s;
 };
@@ -73,7 +81,35 @@ app.get('/api/config', (req, res) => res.json({ config: store.config, meta: {
   strategiesBySymbol: Object.fromEntries(SYMBOLS.map((s) => [s, strategiesForSymbol(s)])),
   symbolMeta: SYMBOL_META, assetClasses: ASSET_CLASSES, classLabel: CLASS_LABEL,
   timeframeChoices: CRYPTO_TIMEFRAME_CHOICES, timeframeLabel: TF_LABEL,
+  universe: universe.snapshot(),
 } }));
+app.get('/api/universe', (req, res) => res.json(universe.snapshot()));
+app.post('/api/universe/refresh', async (req, res) => ok(res, await universe.refresh()));
+// Universe settings: trade permissions follow on the next re-rank, the watch list (market data streams) on restart.
+app.post('/api/config/universe', (req, res) => {
+  try {
+    const b = req.body.settings || {};
+    const cur = universeConfig(store.config);
+    const sym = (x) => String(x).trim().toUpperCase();
+    const next = {
+      ...cur,
+      mode: ['TOP_QUOTE_VOLUME', 'STATIC'].includes(b.mode) ? b.mode : cur.mode,
+      watchTopN: num(b.watchTopN ?? cur.watchTopN, { min: 1, max: 50, int: true }),
+      tradeTopN: num(b.tradeTopN ?? cur.tradeTopN, { min: 1, max: 50, int: true }),
+      minListingDays: num(b.minListingDays ?? cur.minListingDays, { min: 0, max: 3650, int: true }),
+      alwaysInclude: Array.isArray(b.alwaysInclude) ? [...new Set(b.alwaysInclude.map(sym).filter((x) => /^[A-Z0-9]{2,20}USDT$/.test(x)))].slice(0, 10) : cur.alwaysInclude,
+      excludeStablecoinBases: b.excludeStablecoinBases == null ? cur.excludeStablecoinBases : !!b.excludeStablecoinBases,
+      backtestDynamic: b.backtestDynamic == null ? cur.backtestDynamic : !!b.backtestDynamic,
+      backtestRankLookbackDays: num(b.backtestRankLookbackDays ?? cur.backtestRankLookbackDays, { min: 1, max: 365, int: true }),
+      backtestRebalanceDays: num(b.backtestRebalanceDays ?? cur.backtestRebalanceDays, { min: 1, max: 90, int: true }),
+    };
+    if (next.tradeTopN > next.watchTopN) throw new Error('tradeTopN must be <= watchTopN');
+    store.config.cryptoUniverse = next;
+    store.saveConfig();
+    log.info('Universe settings saved — watch list applies after restart', 'CONFIG_SAVED', { watchTopN: next.watchTopN, tradeTopN: next.tradeTopN });
+    ok(res, { ok: true, restartRequired: true });
+  } catch (e) { ok(res, { ok: false, msg: e.message }); }
+});
 app.get('/api/portfolio', (req, res) => res.json(portfolioPayload()));
 app.get('/api/portfolio/equity', (req, res) => {
   const range = ['1D', '7D', '1M', '3M', 'ALL'].includes(req.query.range) ? req.query.range : '1M';
@@ -342,6 +378,7 @@ server.listen(PORT, HOST, async () => {
       await scheduler.catchUp('init');
       controller.start();
       portfolio.start();
+      universe.start(); // 24h re-rank (trade permissions inside the watch set)
       if (engine.mode === 'LIVE') engine.verifyLive(false);
     } catch (e) {
       log.error(`Market data init failed: ${e.message} — retrying in 15s`, 'API_ERROR');

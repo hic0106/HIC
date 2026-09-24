@@ -7,13 +7,16 @@ import { SYMBOL_META, isSessionSymbol } from '../assets.js';
 import { BinanceUsSessionProvider } from '../dataProviders.js';
 import { DATA_DIR } from '../store.js';
 import { backtestStrategy, computeMetrics, LIVE_WINDOW } from './backtester.js';
+import { historicalTradeSets, tradeFilterFrom, UNIVERSE_METHOD } from './historicalUniverse.js';
+import { universeConfig } from '../universe.js';
 
 const DAY = 86_400_000;
 const FILE = path.join(DATA_DIR, 'backtest-last.json');
-const toCandle = (a) => ({ t: a[0], o: +a[1], h: +a[2], l: +a[3], c: +a[4], v: +a[5], T: a[6] });
+const toCandle = (a) => ({ t: a[0], o: +a[1], h: +a[2], l: +a[3], c: +a[4], v: +a[5], T: a[6], qv: a[7] != null ? +a[7] : null }); // qv: quote volume (USDT)
 
 export class BacktestRunner {
-  constructor({ store, md, log, rest }) {
+  constructor({ store, md, log, rest, universe = null }) {
+    this.universe = universe;
     this.store = store;
     this.md = md;
     this.log = log;
@@ -92,14 +95,45 @@ export class BacktestRunner {
 
   needFor(config, strategies) {
     const need = new Map();
-    for (const st of strategies) for (const s of symbolsForStrategy(st)) need.set(`${s}|${timeframeOf(st, config)}`, { s, tf: timeframeOf(st, config) });
+    const dyn = universeConfig(config).backtestDynamic;
+    for (const st of strategies) for (const s of symbolsForStrategy(st)) {
+      need.set(`${s}|${timeframeOf(st, config)}`, { s, tf: timeframeOf(st, config) });
+      if (dyn && STRATEGY_CLASS[st] === 'CRYPTO') need.set(`${s}|1d`, { s, tf: '1d' }); // daily quoteVolume for the historical ranking
+    }
     return [...need.values()];
+  }
+
+  // Dynamic crypto universe for one run: trade permissions from historical quoteVolume inside the watch set.
+  // Returns {} when disabled / not crypto / daily data missing (then every symbol may enter, as before).
+  universeFor(config, ctx, strategy, custom) {
+    const u = universeConfig(config);
+    const crypto = custom ? true : STRATEGY_CLASS[strategy] === 'CRYPTO';
+    if (!u.backtestDynamic || !crypto) return {};
+    const symbols = custom?.symbols || symbolsForStrategy(strategy);
+    const daily = ctx.data['1d'] || {};
+    if (!symbols.length || symbols.some((s) => !daily[s])) return {};
+    const key = `${symbols.join(',')}|${u.tradeTopN}|${u.backtestRankLookbackDays}|${u.backtestRebalanceDays}|${u.minListingDays}`;
+    ctx.universeSets ||= {};
+    const sets = (ctx.universeSets[key] ||= historicalTradeSets(daily, {
+      symbols, start: ctx.start, end: ctx.end, lookbackDays: u.backtestRankLookbackDays, rebalanceDays: u.backtestRebalanceDays,
+      topN: u.tradeTopN, minListingDays: u.minListingDays, alwaysInclude: u.alwaysInclude,
+    }));
+    return {
+      tradeFilter: tradeFilterFrom(sets), slots: u.tradeTopN,
+      universeNote: `${UNIVERSE_METHOD}: new entries only for the top ${u.tradeTopN} of ${symbols.length} watched symbols by ${u.backtestRankLookbackDays}d quote volume before each ${u.backtestRebalanceDays}d rebalance`,
+      meta: { method: UNIVERSE_METHOD, watchSymbols: symbols.length, tradeTopN: u.tradeTopN, lookbackDays: u.backtestRankLookbackDays, rebalanceDays: u.backtestRebalanceDays,
+        rebalances: sets.length, last: sets.length ? [...sets[sets.length - 1].symbols] : [] },
+    };
   }
 
   // One strategy over [from, to) of the loaded period (built-in strategy or AI rule strategy via `custom`)
   async runOne({ config, ctx, strategy, custom = null, capital, compound, from = ctx.start, to = ctx.end }) {
     const tf = custom ? custom.timeframe : timeframeOf(strategy, config);
-    return backtestStrategy({ strategy: strategy || custom?.meta?.label || 'AI', config, data: ctx.data[tf] || {}, funding: ctx.funding, start: from, end: to, capital, compound, custom });
+    const uni = this.universeFor(config, ctx, strategy, custom);
+    const r = await backtestStrategy({ strategy: strategy || custom?.meta?.label || 'AI', config, data: ctx.data[tf] || {}, funding: ctx.funding, start: from, end: to, capital, compound, custom,
+      tradeFilter: uni.tradeFilter || null, slots: uni.slots || null, universeNote: uni.universeNote || null });
+    if (uni.meta) r.universe = uni.meta;
+    return r;
   }
 
   // Full period + in-sample (first 70%) + out-of-sample (last 30%) - used by the AI improvement loop

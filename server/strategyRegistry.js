@@ -1,11 +1,11 @@
 // Strategy registry: maps asset classes to strategy groups.
-//   CRYPTO        (BTC/ETH/XRP) : TURTLE, ADX, TSMOM            — unchanged, from strategies.js
+//   CRYPTO        (dynamic universe, server/universe.js) : TURTLE, ADX, TSMOM, RAYNER — from strategies.js
 //   TRADFI_INDEX  (QQQ)         : QQQ_EMA_TREND, QQQ_TSMOM, QQQ_SMA200, QQQ_TURTLE_50_20
-import { STRATEGIES as CRYPTO_STRATEGIES, STRATEGY_META as CRYPTO_META, evaluate as evaluateCrypto, stopDistancePct } from './strategies.js';
+import { STRATEGIES as CRYPTO_STRATEGIES, STRATEGY_META as CRYPTO_META, evaluate as evaluateCrypto, stopDistancePct, exitFor, entryStop, stopReasonOf, trendCounts, recordTrendEntry } from './strategies.js';
 import { TRADFI_STRATEGIES, TRADFI_META, evaluateTradfi } from './strategiesTradfi.js';
 import { assetClassOf, symbolsOfClass } from './assets.js';
 
-export { stopDistancePct, CRYPTO_STRATEGIES, TRADFI_STRATEGIES };
+export { stopDistancePct, exitFor, entryStop, stopReasonOf, trendCounts, recordTrendEntry, CRYPTO_STRATEGIES, TRADFI_STRATEGIES };
 
 export const ALL_STRATEGIES = [...CRYPTO_STRATEGIES, ...TRADFI_STRATEGIES];
 export const STRATEGY_CLASS = Object.fromEntries([

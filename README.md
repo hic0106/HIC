@@ -3,7 +3,7 @@
 Binance USDT-M Perpetual Futures 기반 멀티자산·멀티전략 자동매매 트레이딩 터미널.
 
 ```
-CRYPTO  BTCUSDT / ETHUSDT / XRPUSDT  → Turtle 20/10 (4H) · ADX 14/25 (4H) · TSMOM 30d (1D)
+CRYPTO  Binance USDT-M 거래대금 상위 20 감시 / 상위 15 신규진입 → Turtle 20/10 (4H) · ADX 14/25 (4H) · TSMOM 30d (1D) · Rayner (4H, 기본 OFF)
 TRADFI  QQQUSDT (Invesco QQQ 지수 perpetual) → EMA 50/150 · TSMOM 126 · SMA200(옵션) · Turtle 50/20(옵션)   (미국 정규장 세션)
 SELF-IMPROVING CONTROLLER → 두 자산군의 주문 배수만 조절
 EXECUTION → Binance Futures
@@ -14,6 +14,7 @@ EXECUTION → Binance Futures
 | TURTLE 20/10 (4H) | Long + Short | 종가 > 이전 20봉 고가 / 종가 < 이전 20봉 저가 **AND** 종가 < SMA200 | Long: 종가 < 이전 10봉 저가, Short: 종가 > 이전 10봉 고가 | ATR(20)×2.0, 8~18% |
 | ADX Trend (4H) | Long + Short | ADX>25 & +DI>-DI / ADX>25 & -DI>+DI & 종가<SMA200 | Long: ADX<=25 or -DI>=+DI, Short: ADX<=25 or +DI>=-DI | ATR(14)×2.0, 6~15% |
 | TSMOM 30D (1D) | Long + Cash | 30일 누적 로그수익률 > 0 | 30일 모멘텀 <= 0 | ATR(20)×3.0, 10~22% |
+| RAYNER (4H, 기본 OFF) | Long + Short | 종가 > EMA50, EMA50[0] > EMA50[3], MACD(1,50,9) Hist > 0 이고 Hist[0] > max(Hist[1..3]) × 1.5 (Short 대칭: < min × 1.5) · 추세당 최대 2회 | 히스토그램이 진입 때 고정한 최근 25봉 최대(Long)/최소(Short) 초과 → `RAYNER_HIST_TP`, 종가가 EMA50 반대편 또는 Hist 부호 반대 → 전략 청산 | STRUCTURE: 신호 봉 포함 최근 10봉 최저가(Long)/최고가(Short), 진입 후 고정 (`STRUCTURE_STOP`) |
 
 - 채널 계산에서 현재 봉은 제외합니다. 신호는 전략별 Timeframe의 **마감된 캔들**로만 평가합니다: Turtle·ADX = 4H (KST 01·05·09·13·17·21시 마감), TSMOM = 1D (UTC 00:00 = KST 09:00), QQQ = 미국 정규장 마감(America/New_York). 아래 [StrategyScheduler](#strategyscheduler) 참고.
 - Emergency Stop은 실시간 가격으로 감시하며, 전략 Exit와 Stop 중 먼저 발생한 조건으로 청산합니다.
@@ -183,6 +184,17 @@ Emergency Stop / Take Profit은 스케줄러와 분리되어 **모든 가격 틱
 - 체결·청산·비상청산 시 즉시 갱신(Signal → Order → Fill → Position → Portfolio).
 - PAPER 모드는 가상 계좌가 Exchange View 역할을 합니다.
 
+## 코인 종목 선정 (동적 Universe)
+
+`server/universe.js`. 프로그램 시작 시 Binance 공개 API(`/fapi/v1/exchangeInfo`, `/fapi/v1/ticker/24hr`)로 감시 코인을 정합니다.
+
+- 후보: `status=TRADING`, `contractType=PERPETUAL`, `quoteAsset=USDT`, `underlyingType=COIN`, 상장 90일 이상, 스테이블코인 기반 제외(USDT·USDC·FDUSD·TUSD·USDP·DAI·USDE·USD1·BUSD 등), TradFi(QQQUSDT, `TRADIFI_PERPETUAL`) 제외.
+- 순위: 24시간 **quoteVolume**(USDT 거래대금). base volume은 쓰지 않습니다.
+- 감시(Watch) = 상위 20 + 항상 포함(BTC, ETH): 시세·신호·포지션 관리·차트. 신규진입(Trade) = 상위 15 + 항상 포함. 16~20위는 감시만 하고 새로 진입하지 않습니다(엔진이 주문 직전에 다시 확인, `UNIVERSE_FILTER`). 청산·Stop은 막지 않습니다.
+- **보호 종목**: PAPER/LIVE 포지션, 대기/확인 중 주문, 거래소 Stop이 있는 코인은 순위와 관계없이 계속 감시합니다.
+- 24시간마다 순위를 다시 계산해 신규진입 허용만 갱신합니다(이미 구독 중인 감시 종목 안에서). 감시 목록 자체의 변경은 **재시작 시 반영**됩니다(실행 중 WebSocket 재구성 안 함). 조회 실패 시 마지막으로 저장한 순위(`data/universe.json`) → 없으면 BTC/ETH/XRP를 씁니다.
+- 설정: 전략 설정 탭 › 종목 선정 (`config.cryptoUniverse`).
+
 ## Backtest
 
 상단 `BACKTEST` 화면에서 `RUN BACKTEST`. PC에서 Binance 공개 데이터(API 키 불필요)를 받아 과거 구간을 재생합니다. 주문은 보내지 않습니다.
@@ -192,6 +204,8 @@ Emergency Stop / Take Profit은 스케줄러와 분리되어 **모든 가격 틱
 - 자금: 전략마다 별도 계좌(기본 ₩1,000,000). 종목 슬롯마다 진입 시점 계좌 평가액 / 종목 수(Compound) 또는 원금 / 종목 수(고정). 레버리지는 적용하지 않습니다(1x, 청산 미모델링).
 - 결과: 전략별 최종 금액·수익률·CAGR·MDD·거래수·승률·Profit Factor·Sharpe·수수료·펀딩·Buy&Hold 비교, 전체 합산, 자산 곡선, 캔들 위 진입/청산 표시, 거래 목록(클릭 → 차트 이동).
 - 수익률은 USDT 가격 기준입니다. 원화 금액은 원금에 그 수익률을 적용한 값이며 환율 변동은 반영하지 않습니다.
+- 코인 전략(동적 Universe 사용 시): 현재 감시 종목 안에서 7일마다 직전 30일 quoteVolume 합계(그 시점 이전에 마감된 일봉만)로 상위 15개를 다시 골라 다음 7일간 신규진입을 허용합니다. 미래 거래대금은 보지 않습니다. 자금은 원금 / 15 슬롯, 동시 보유는 최대 15개. 결과 Notes에 `HISTORICAL_QUOTE_VOLUME_WITHIN_WATCH_SET` 표시.
+  - 한계: 후보가 **현재** 상위 목록이라 과거에 상위였다가 지금 빠진 코인은 없습니다(생존 편향 일부 남음). Binance 전 종목 point-in-time universe는 미구현.
 - QQQUSDT는 2026-04-06 상장이라 EMA150·TSMOM126·SMA200은 지표 준비 기간이 부족해 1년 백테스트가 불가능합니다(화면 Notes에 표시). Controller 배율은 적용하지 않습니다(1.00x 기준).
 
 ## AI 분석 · 자동 개선 · 전략 생성 (Claude API)

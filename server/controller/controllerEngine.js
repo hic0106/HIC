@@ -32,6 +32,7 @@ export class Controller {
     this.shadow = new ShadowPortfolio({
       md, symbols, getConfig: () => this.store.config,
       proposedMultiplier: (st, side) => this.proposedMultiplier(st, side),
+      canEnter: (sym) => !this.engine?.universe || this.engine.universe.isTradeAllowed(sym),
       state: cstore.state.shadow || emptyShadowState(),
     });
     cstore.state.shadow = this.shadow.state;
@@ -46,7 +47,12 @@ export class Controller {
     return STRATEGIES.flatMap((st) => SIDES.filter((side) => side === 'LONG' || STRATEGY_META[st].supportsShort)
       .map((side) => ({ strategy: st, side, key: sideKey(st, side), assetClass: STRATEGY_CLASS[st] })));
   }
-  nSlots(strategy) { return Math.max(1, symbolsForStrategy(strategy).length); }
+  // capital normalization: crypto strategies can hold at most tradeTopN new-entry symbols (watch-only symbols: exits)
+  nSlots(strategy) {
+    const n = symbolsForStrategy(strategy).length;
+    const cap = STRATEGY_CLASS[strategy] === 'CRYPTO' ? Number(this.store.config.cryptoUniverse?.tradeTopN) : NaN;
+    return Math.max(1, Number.isFinite(cap) && cap > 0 ? Math.min(n, cap) : n);
+  }
   sideActive(strategy, side) {
     const s = this.store.config.strategies[strategy];
     return side === 'LONG' || (STRATEGY_META[strategy].supportsShort && !!s.shortEnabled);

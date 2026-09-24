@@ -8,16 +8,21 @@
 //   - exit first, then entry on the same candle (flip); one position per strategy × symbol
 //   - re-arm after stop exits for ADX / TSMOM / QQQ (resetAfterStop), Turtle re-enters on a new breakout
 //   - funding: position value × historical funding rate at each funding time held (paid when > 0 for longs)
-// Sizing: each strategy has its own account (capital). Each symbol slot gets equity / nSymbols at entry
-// (compound) or capital / nSymbols (fixed). 1x notional, no leverage.
-import { META, evaluateStrategy, stopDistancePct, symbolsForStrategy } from '../strategyRegistry.js';
+//   - Rayner: structure stop from the signal candle (entry skipped if it is not beyond the fill), histogram target
+//     fixed at entry (RAYNER_HIST_TP), at most maxEntriesPerTrend entries per side until a close across the EMA
+//   - dynamic crypto universe (optional tradeFilter(symbol, signalTime)): new entries only when the symbol was in the
+//     historical trade set at the signal time; exits / stops are never filtered
+// Sizing: each strategy has its own account (capital). Each slot gets equity / nSlots at entry (compound) or
+// capital / nSlots (fixed); nSlots = number of symbols, or `slots` (e.g. tradeTopN) when given - then at most
+// `slots` positions are open at once. 1x notional, no leverage.
+import { META, evaluateStrategy, symbolsForStrategy, exitFor, entryStop, stopReasonOf, trendCounts, recordTrendEntry } from '../strategyRegistry.js';
 import { timeframeOf, US_SESSION } from '../scheduler/timeframes.js';
 
 export const LIVE_WINDOW = { '4h': 1000, '1d': 500, [US_SESSION]: Infinity };
 const dirOf = (side) => (side === 'LONG' ? 1 : -1);
 
 // custom (optional): { cfg, meta, timeframe, prepare(bars) -> (i) => signal } for AI rule strategies (server/ai/dsl.js)
-export async function backtestStrategy({ strategy, config, data, funding = {}, start, end, capital, compound = true, symbols, custom = null }) {
+export async function backtestStrategy({ strategy, config, data, funding = {}, start, end, capital, compound = true, symbols, custom = null, tradeFilter = null, slots = null, universeNote = null }) {
   symbols ||= custom?.symbols || symbolsForStrategy(strategy);
   const scfg = custom ? custom.cfg : config.strategies[strategy];
   const g = config.general;
@@ -26,12 +31,14 @@ export async function backtestStrategy({ strategy, config, data, funding = {}, s
   const fee = g.takerFeePct / 100, slip = g.slippagePct / 100;
   const useFunding = !!g.includeFunding;
   const meta = custom ? custom.meta : META[strategy];
-  const n = Math.max(1, symbols.length);
+  const n = Math.max(1, Math.min(symbols.length, slots > 0 ? slots : symbols.length));
+  const capSlots = n < symbols.length; // more watched symbols than slots: limit concurrent positions
 
   let cash = capital; // realized equity
   const trades = [], equity = [], notes = [];
-  const pos = {}, pending = {}, block = {}, lastPx = {}, fIdx = {}, stats = { fees: 0, funding: 0, signalsSkipped: 0, notReady: {} };
-  for (const s of symbols) { block[s] = { LONG: false, SHORT: false }; pending[s] = []; fIdx[s] = 0; }
+  const pos = {}, pending = {}, block = {}, lastPx = {}, fIdx = {}, trendEntries = {};
+  const stats = { fees: 0, funding: 0, signalsSkipped: 0, notReady: {}, universeSkipped: 0, slotsFull: 0, stopInvalid: 0, trendMax: 0 };
+  for (const s of symbols) { block[s] = { LONG: false, SHORT: false }; pending[s] = []; fIdx[s] = 0; trendEntries[s] = { LONG: [], SHORT: [] }; }
 
   // timeline: open times of bars inside [start, end] across this strategy's symbols
   const bars = {};
@@ -64,8 +71,12 @@ export async function backtestStrategy({ strategy, config, data, funding = {}, s
     return trades[trades.length - 1];
   };
 
-  const open = (s, side, rawPx, time, atr) => {
+  const open = (s, o, rawPx, time) => {
+    const { side } = o;
     const px = rawPx * (1 + dirOf(side) * slip);
+    if (capSlots && Object.keys(pos).length >= n) { stats.slotsFull++; return; }
+    const es = entryStop(scfg.stop, { atr: o.atr, structStop: { [side]: o.structStop } }, side, px);
+    if (es.invalid) { stats.stopInvalid++; return; } // structure stop not beyond the fill -> entry cancelled
     const eq = equityNow();
     const alloc = (compound ? Math.max(0, eq) : capital) / n;
     if (!(alloc > 0)) return;
@@ -73,10 +84,10 @@ export async function backtestStrategy({ strategy, config, data, funding = {}, s
     const entryFee = alloc * fee;
     stats.fees += entryFee;
     cash -= entryFee;
-    const d = stopDistancePct(scfg.stop, atr, px);
     pos[s] = { side, entry: px, qty, notional: alloc, time, entryFee, fundingAcc: 0,
-      stop: d == null ? null : px * (1 - dirOf(side) * d / 100), stopPct: d,
+      stop: es.stopPrice, stopPct: es.distPct, stopMode: scfg.stop.mode, histTarget: o.histTarget ?? null,
       tp: scfg.takeProfit?.enabled ? px * (1 + dirOf(side) * scfg.takeProfit.pct / 100) : null };
+    if (meta.trendEntries) recordTrendEntry(trendEntries[s], side, o.signalCandle);
   };
 
   let step = 0;
@@ -89,8 +100,8 @@ export async function backtestStrategy({ strategy, config, data, funding = {}, s
       const b = bars[s][i];
       // 1) orders decided at the previous close fill at this open
       for (const o of pending[s]) {
-        if (o.type === 'EXIT' && pos[s]) { const tr = close(s, b.o, b.t, 'STRATEGY_EXIT'); tr.signalTime = o.signalTime; }
-        if (o.type === 'ENTRY' && !pos[s]) { open(s, o.side, b.o, b.t, o.atr); if (pos[s]) pos[s].signalTime = o.signalTime; }
+        if (o.type === 'EXIT' && pos[s]) { const tr = close(s, b.o, b.t, o.reason || 'STRATEGY_EXIT'); tr.signalTime = o.signalTime; }
+        if (o.type === 'ENTRY' && !pos[s]) { open(s, o, b.o, b.t); if (pos[s]) pos[s].signalTime = o.signalTime; }
       }
       pending[s] = [];
       // 2) intrabar emergency stop / take profit
@@ -101,7 +112,7 @@ export async function backtestStrategy({ strategy, config, data, funding = {}, s
         const hi = p.side === 'LONG' ? b.h : b.l; // favorable extreme
         if (p.stop != null && (lo - p.stop) * d <= 0) {
           const fill = (b.o - p.stop) * d <= 0 ? b.o : p.stop; // gap through stop -> open
-          close(s, fill, b.t, scfg.stop.mode === 'FIXED_PERCENT' ? 'FIXED_STOP' : 'ATR_STOP');
+          close(s, fill, b.t, stopReasonOf(p.stopMode));
         } else if (p.tp != null && (hi - p.tp) * d >= 0) {
           close(s, (b.o - p.tp) * d >= 0 ? b.o : p.tp, b.t, 'TAKE_PROFIT');
         }
@@ -123,9 +134,9 @@ export async function backtestStrategy({ strategy, config, data, funding = {}, s
       const sig = custom ? evalAt[s](i) : evaluateStrategy(strategy, bars[s].slice(Math.max(0, i + 1 - (Number.isFinite(W) ? W : i + 1)), i + 1), scfg);
       if (!sig.ready) { stats.notReady[s] = (stats.notReady[s] || 0) + 1; continue; }
       if (pos[s]) {
-        const exit = pos[s].side === 'LONG' ? sig.longExit : sig.shortExit;
-        if (!exit) continue;
-        pending[s].push({ type: 'EXIT', signalTime: b.T + 1 });
+        const ex = exitFor(strategy, sig, pos[s]);
+        if (!ex.exit) continue;
+        pending[s].push({ type: 'EXIT', reason: ex.reason, signalTime: b.T + 1 });
       }
       if (!sig.longCond) block[s].LONG = false;
       if (!sig.shortCond) block[s].SHORT = false;
@@ -134,7 +145,9 @@ export async function backtestStrategy({ strategy, config, data, funding = {}, s
       else if (sig.shortCond && scfg.shortEnabled && meta.supportsShort) side = 'SHORT';
       if (!side) continue;
       if (block[s][side]) { stats.signalsSkipped++; continue; }
-      pending[s].push({ type: 'ENTRY', side, atr: sig.atr, signalTime: b.T + 1 });
+      if (meta.trendEntries && trendCounts(sig, trendEntries[s])[side] >= scfg.params.maxEntriesPerTrend) { stats.trendMax++; continue; }
+      if (tradeFilter && !tradeFilter(s, b.T + 1)) { stats.universeSkipped++; continue; }
+      pending[s].push({ type: 'ENTRY', side, atr: sig.atr, structStop: sig.structStop?.[side] ?? null, histTarget: sig.histTarget?.[side] ?? null, signalCandle: sig.candleTime, signalTime: b.T + 1 });
     }
     // mark to market once per time step
     const eq = equityNow();
@@ -148,6 +161,11 @@ export async function backtestStrategy({ strategy, config, data, funding = {}, s
   const bh = benchmark(symbols, bars, idx, timeline, capital);
   const metrics = computeMetrics({ equity, trades, capital, timeline, bars, symbols, start, end });
   if (!timeline.length) notes.push('no candles in the test period');
+  if (universeNote) notes.push(universeNote);
+  if (stats.universeSkipped) notes.push(`${stats.universeSkipped} entry signal(s) skipped: symbol outside the historical trade universe at signal time`);
+  if (stats.slotsFull) notes.push(`${stats.slotsFull} entry signal(s) skipped: all ${n} slots in use`);
+  if (stats.stopInvalid) notes.push(`${stats.stopInvalid} entry signal(s) cancelled: structure stop not beyond the fill price`);
+  if (stats.trendMax) notes.push(`${stats.trendMax} entry signal(s) skipped: max entries per trend reached`);
   for (const [s, c] of Object.entries(stats.notReady)) {
     const total = timeline.filter((t) => idx[s].has(t)).length;
     if (c >= total && total > 0) notes.push(`${s}: indicators never ready in the period (insufficient history for current parameters)`);
@@ -155,7 +173,8 @@ export async function backtestStrategy({ strategy, config, data, funding = {}, s
   }
   return {
     strategy, timeframe: tf, symbols, capital, compound, enabled: !!scfg.enabled, params: scfg.params, stop: scfg.stop, takeProfit: scfg.takeProfit, shortEnabled: !!(scfg.shortEnabled && meta.supportsShort),
-    metrics, equity, benchmark: bh, trades, openPositions, fees: stats.fees, funding: -stats.funding, notes,
+    metrics, equity, benchmark: bh, trades, openPositions, fees: stats.fees, funding: -stats.funding, notes, slots: n,
+    skipped: { universe: stats.universeSkipped, slotsFull: stats.slotsFull, stopInvalid: stats.stopInvalid, trendMax: stats.trendMax, rearm: stats.signalsSkipped },
   };
 }
 

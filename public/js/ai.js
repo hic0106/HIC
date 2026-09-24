@@ -2,7 +2,7 @@
 import { $, esc, api, toast, fNum, fPct, fDateTime } from './util.js';
 import { confirmDialog } from './modals.js';
 
-const SHORT = { TURTLE: '터틀', ADX: 'ADX', TSMOM: 'TSMOM', QQQ_EMA_TREND: 'QQQ EMA', QQQ_TSMOM: 'QQQ TSMOM', QQQ_SMA200: 'QQQ SMA200', QQQ_TURTLE_50_20: 'QQQ 터틀50/20' };
+const SHORT = { TURTLE: '터틀', ADX: 'ADX', TSMOM: 'TSMOM', RAYNER: 'Rayner', QQQ_EMA_TREND: 'QQQ EMA', QQQ_TSMOM: 'QQQ TSMOM', QQQ_SMA200: 'QQQ SMA200', QQQ_TURTLE_50_20: 'QQQ 터틀50/20' };
 const VERDICT = { GOOD: ['좋음', 'LONG'], MIXED: ['보통', 'PENDING'], BAD: ['나쁨', 'SHORT'], NO_DATA: ['데이터 부족', 'OFF'], PASSED: ['검증 통과', 'LONG'], OVERFIT: ['과최적화 의심', 'PENDING'], WORSE: ['개선 안 됨', 'SHORT'], INVALID: ['오류', 'OFF'], FAILED: ['검증 실패', 'SHORT'] };
 const SEV = { HIGH: ['높음', 'down'], MEDIUM: ['중간', 'warn'], LOW: ['낮음', 'muted'] };
 const tag = (v) => { const [l, c] = VERDICT[v] || [v, 'WAIT']; return `<span class="tag ${c}">${l}</span>`; };
