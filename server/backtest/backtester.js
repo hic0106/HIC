@@ -16,14 +16,16 @@ import { timeframeOf, US_SESSION } from '../scheduler/timeframes.js';
 export const LIVE_WINDOW = { '4h': 1000, '1d': 500, [US_SESSION]: Infinity };
 const dirOf = (side) => (side === 'LONG' ? 1 : -1);
 
-export function backtestStrategy({ strategy, config, data, funding = {}, start, end, capital, compound = true, symbols = symbolsForStrategy(strategy) }) {
-  const scfg = config.strategies[strategy];
+// custom (optional): { cfg, meta, timeframe, prepare(bars) -> (i) => signal } for AI rule strategies (server/ai/dsl.js)
+export function backtestStrategy({ strategy, config, data, funding = {}, start, end, capital, compound = true, symbols, custom = null }) {
+  symbols ||= custom?.symbols || symbolsForStrategy(strategy);
+  const scfg = custom ? custom.cfg : config.strategies[strategy];
   const g = config.general;
-  const tf = timeframeOf(strategy, config);
+  const tf = custom ? custom.timeframe : timeframeOf(strategy, config);
   const W = LIVE_WINDOW[tf] ?? 1000;
   const fee = g.takerFeePct / 100, slip = g.slippagePct / 100;
   const useFunding = !!g.includeFunding;
-  const meta = META[strategy];
+  const meta = custom ? custom.meta : META[strategy];
   const n = Math.max(1, symbols.length);
 
   let cash = capital; // realized equity
@@ -41,6 +43,8 @@ export function backtestStrategy({ strategy, config, data, funding = {}, start, 
   const timeline = [...times].sort((a, b) => a - b);
   const idx = {};
   for (const s of symbols) { idx[s] = new Map(); bars[s].forEach((b, i) => idx[s].set(b.t, i)); }
+  const evalAt = {};
+  if (custom) for (const s of symbols) evalAt[s] = custom.prepare(bars[s]);
 
   const unrealized = (s, px) => { const p = pos[s]; return p ? (px - p.entry) * p.qty * dirOf(p.side) : 0; };
   const equityNow = () => cash + symbols.reduce((a, s) => a + (pos[s] ? unrealized(s, lastPx[s]) - pos[s].fundingAcc : 0), 0);
@@ -113,8 +117,7 @@ export function backtestStrategy({ strategy, config, data, funding = {}, start, 
       }
       lastPx[s] = b.c;
       // 4) strategy evaluation on this closed candle (same window length as live)
-      const win = bars[s].slice(Math.max(0, i + 1 - (Number.isFinite(W) ? W : i + 1)), i + 1);
-      const sig = evaluateStrategy(strategy, win, scfg);
+      const sig = custom ? evalAt[s](i) : evaluateStrategy(strategy, bars[s].slice(Math.max(0, i + 1 - (Number.isFinite(W) ? W : i + 1)), i + 1), scfg);
       if (!sig.ready) { stats.notReady[s] = (stats.notReady[s] || 0) + 1; continue; }
       if (pos[s]) {
         const exit = pos[s].side === 'LONG' ? sig.longExit : sig.shortExit;

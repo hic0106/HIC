@@ -197,9 +197,12 @@ export class Store {
     try { fs.chmodSync(F.secrets, 0o600); } catch { /* windows */ }
   }
 
+  // Deletes the Binance key only (a Claude API key, if any, is kept).
   clearSecrets() {
+    const keep = this.secrets.anthropicApiKey;
     this.secrets = { apiKey: '', apiSecret: '', testnet: false };
-    try { fs.unlinkSync(F.secrets); } catch { /* none */ }
+    if (keep) this.saveSecrets({ anthropicApiKey: keep });
+    else { try { fs.unlinkSync(F.secrets); } catch { /* none */ } }
   }
 
   logFile(day) {

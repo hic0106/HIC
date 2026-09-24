@@ -1,6 +1,7 @@
 // BACKTEST screen: replay of the current strategy settings over past Binance data (no orders).
 import { $, $$, esc, fNum, fSigned, fPct, fDateTime, cls, api, toast } from './util.js';
 import { ST_COLOR } from './chart.js';
+import { mountAi } from './ai.js';
 
 const LC = window.LightweightCharts;
 const TZ = -new Date().getTimezoneOffset() * 60;
@@ -35,13 +36,15 @@ export function mountBacktest(root) {
       <div class="pf-card"><div class="panel-h">성과 지표 <span class="muted" id="btMTitle"></span></div><div id="btMetrics"></div></div>
     </div>
     <div class="pf-card"><div class="panel-h">차트 · 전략 캔들 위 매매 위치 <span class="pf-tools" id="btSyms"></span></div><div id="btCandle" class="bt-chart tall"></div></div>
-    <div class="pf-card"><div class="panel-h">거래 목록 <span class="muted" id="btTrTitle"></span></div><div id="btTrades"></div></div>`;
+    <div class="pf-card"><div class="panel-h">거래 목록 <span class="muted" id="btTrTitle"></span></div><div id="btTrades"></div></div>
+    <div id="aiPanel" class="bt-ai"></div>`;
   $('#btRun').onclick = run;
   $('#btSummary').addEventListener('click', (e) => { const r = e.target.closest('tr[data-st]'); if (r) select(r.dataset.st); });
   $('#btSyms').addEventListener('click', (e) => { const b = e.target.closest('button[data-sym]'); if (b) { B.sym = b.dataset.sym; renderDetail(); } });
   $('#btTrades').addEventListener('click', (e) => { const r = e.target.closest('tr[data-i]'); if (r) focusTrade(Number(r.dataset.i)); });
   initCharts();
   load();
+  mountAi($('#aiPanel'));
 }
 
 async function run() {

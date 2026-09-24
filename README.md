@@ -193,6 +193,17 @@ Emergency Stop / Take Profit은 스케줄러와 분리되어 **모든 가격 틱
 - 수익률은 USDT 가격 기준입니다. 원화 금액은 원금에 그 수익률을 적용한 값이며 환율 변동은 반영하지 않습니다.
 - QQQUSDT는 2026-04-06 상장이라 EMA150·TSMOM126·SMA200은 지표 준비 기간이 부족해 1년 백테스트가 불가능합니다(화면 Notes에 표시). Controller 배율은 적용하지 않습니다(1.00x 기준).
 
+## AI 분석 · 자동 개선 · 전략 생성 (Claude API)
+
+백테스트 화면 아래 **AI 패널**. Claude API 키(Anthropic Console에서 발급, `sk-ant-…`)를 [Claude API 키]에 입력하면 `data/secrets.json`에만 저장됩니다(화면으로 다시 보내지 않음). 모델은 `claude-opus-5`, 호출마다 API 사용료가 발생합니다. AI는 주문을 내지 않습니다.
+
+- **손실 원인 분석**: 마지막 백테스트 결과(전략별 지표, 청산 사유별·종목별·롱/숏별 손익, 월별 수익률, 최악 거래, 수수료·펀딩)를 보내 전략별 원인·근거·개선 방향을 받습니다.
+- **자동 개선 (self-improve)**: 전략 하나를 골라 1~3회 반복. Claude가 설정 변경안(최대 3개/회)을 내면 각각 자동 백테스트하고 결과를 다시 Claude에 보내 다음 안을 받습니다.
+  - 기간을 **학습 70% / 검증 30%**로 나누고 Claude에게는 학습 구간만 보여줍니다. 학습 구간에서 (수익률÷최대낙폭)이 기준보다 좋고, 검증 구간에서도 나빠지지 않아야 "검증 통과".
+  - 주문금액·켜짐/꺼짐은 바꿀 수 없고, 변경 가능한 항목(조건·캔들·숏·손절·익절)도 수동 저장과 같은 검증을 거칩니다. **[적용]을 눌러야** 설정에 반영됩니다.
+- **AI 전략 만들기**: 아이디어(비워 두면 AI가 설계)를 입력하면 Claude가 **규칙 형식(JSON)**으로 전략을 작성 → 검증 → 백테스트 → 결과를 보고 수정합니다. 코드가 아니라 정해진 지표(SMA/EMA/RSI/ATR/ADX/DI/최고가/최저가/모멘텀)와 비교 규칙만 쓰므로 임의 코드가 실행되지 않습니다. 저장한 AI 전략은 `data/ai-strategies.json`. 실거래(모의/실전) 연결은 아직 없습니다.
+- 개발용 가짜 Claude 서버: `npm run mock:claude` 후 `ANTHROPIC_BASE_URL=http://127.0.0.1:9902`로 실행.
+
 ## 알아둘 제한사항
 
 - PC가 꺼져 있으면 Binance Stop 외의 기능(신규 진입, 전략 Exit, Take Profit)은 동작하지 않습니다. 24시간 운용은 클라우드 서버에서 실행하세요.
@@ -229,6 +240,7 @@ server/scheduler/     StrategyScheduler(캔들 마감 평가·중복 방지·cat
 server/risk/          RiskMonitor(실시간 Stop·청산가·연결 감시)
 server/portfolio/     PortfolioService(Exchange/Strategy View), User Data Stream, Reconciliation, Equity History
 server/backtest/      Backtester(전략 재생) + 과거 데이터 로더
+server/ai/            Claude API 연동 (분석·자동 개선·AI 전략 규칙 해석기)
 server/controller/    Self-Improving Controller (engine, 성과 평가, Regime, 결정 규칙, 저장, Shadow Portfolio)
 public/               터미널 UI (lightweight-charts)
 tools/mock-binance.js 개발용 가짜 거래소

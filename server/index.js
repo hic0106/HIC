@@ -17,6 +17,8 @@ import { CRYPTO_TIMEFRAME_CHOICES, TF_LABEL } from './scheduler/timeframes.js';
 import { RiskMonitor } from './risk/riskMonitor.js';
 import { PortfolioService } from './portfolio/portfolioService.js';
 import { BacktestRunner } from './backtest/backtestRunner.js';
+import { validateStrategySettings, num } from './strategyConfig.js';
+import { AiService } from './ai/aiService.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const HOST = process.env.HOST || '127.0.0.1';
@@ -35,6 +37,7 @@ const scheduler = new StrategyScheduler({ store, md, engine, log, signalLog });
 const portfolio = new PortfolioService({ store, engine, md, log });
 const risk = new RiskMonitor({ engine, md, log, portfolio });
 const backtest = new BacktestRunner({ store, md, log, rest: md.rest }); // public market data only, never places orders
+const ai = new AiService({ store, backtest, controller, engine, log }); // Claude API: analysis / improvement proposals / strategy generation (never trades)
 const fullSnapshot = () => {
   const s = engine.snapshot();
   try { s.controller = controller.compact(); } catch (e) { s.controller = { mode: 'ERROR', error: e.message }; }
@@ -92,6 +95,25 @@ app.post('/api/backtest/run', (req, res) => {
 });
 app.get('/api/backtest/status', (req, res) => res.json(backtest.status));
 app.get('/api/backtest/result', (req, res) => res.json(backtest.last || null));
+// ---- AI (Claude API)
+app.get('/api/ai/status', (req, res) => res.json(ai.status()));
+app.post('/api/ai/key', (req, res) => {
+  const k = String(req.body?.apiKey || '').trim();
+  if (!/^sk-ant-/.test(k)) return ok(res, { ok: false, msg: 'Claude API 키 형식이 아닙니다 (sk-ant-로 시작)' });
+  store.saveSecrets({ anthropicApiKey: k });
+  log.info('Claude API key saved', 'API_KEY');
+  ok(res);
+});
+app.delete('/api/ai/key', (req, res) => { store.saveSecrets({ anthropicApiKey: '' }); log.warn('Claude API key deleted', 'API_KEY'); ok(res); });
+app.post('/api/ai/analyze', (req, res) => ok(res, ai.analyze()));
+app.post('/api/ai/improve', (req, res) => ok(res, ai.improve({ strategy: String(req.body?.strategy || ''), rounds: req.body?.rounds })));
+app.post('/api/ai/generate', (req, res) => ok(res, ai.generate({ idea: String(req.body?.idea || '').slice(0, 2000), rounds: req.body?.rounds })));
+app.post('/api/ai/apply', (req, res) => {
+  if (engine.mode === 'LIVE' && engine.runState === 'RUNNING' && !confirmed(req, 'APPLY')) return ok(res, { ok: false, msg: 'LIVE running: confirmation required', needConfirm: true });
+  try { ok(res, ai.applyCandidate({ strategy: String(req.body?.strategy || ''), id: String(req.body?.id || '') })); } catch (e) { ok(res, { ok: false, msg: e.message }); }
+});
+app.post('/api/ai/save', (req, res) => ok(res, ai.saveGenerated({ id: String(req.body?.id || '') })));
+app.post('/api/ai/delete', (req, res) => ok(res, ai.deleteSaved({ id: String(req.body?.id || '') })));
 app.get('/api/backtest/candles', (req, res) => res.json(backtest.candles[`${req.query.symbol}|${req.query.tf}`] || []));
 app.get('/api/logs', (req, res) => res.json(log.recent(1000)));
 
@@ -103,11 +125,6 @@ app.get('/api/klines', async (req, res) => {
 });
 
 // ---- strategy / general settings (applied only on Save)
-const num = (v, { min = -Infinity, max = Infinity, int = false } = {}) => {
-  const n = Number(v);
-  if (!Number.isFinite(n) || n < min || n > max || (int && !Number.isInteger(n))) throw new Error(`invalid number: ${v}`);
-  return n;
-};
 
 app.post('/api/config/strategy/:name', (req, res) => {
   const name = req.params.name;
@@ -115,40 +132,7 @@ app.post('/api/config/strategy/:name', (req, res) => {
   if (!cur) return ok(res, { ok: false, msg: 'unknown strategy' });
   if (engine.mode === 'LIVE' && engine.runState === 'RUNNING' && !confirmed(req, 'APPLY')) return ok(res, { ok: false, msg: 'LIVE running: confirmation required', needConfirm: true });
   try {
-    const b = req.body.settings;
-    const amt = (x) => num(x, { min: 0, max: 1e7 });
-    const next = {
-      enabled: !!b.enabled,
-      ...(STRATEGY_CLASS[name] === 'CRYPTO' ? { timeframe: CRYPTO_TIMEFRAME_CHOICES.includes(b.timeframe) ? b.timeframe : (cur.timeframe || '1d') } : {}),
-      shortEnabled: STRATEGY_META[name].supportsShort ? !!b.shortEnabled : false,
-      amounts: {
-        PAPER: { long: amt(b.amounts.PAPER.long), short: amt(b.amounts.PAPER.short ?? 0) },
-        LIVE: { long: amt(b.amounts.LIVE.long), short: amt(b.amounts.LIVE.short ?? 0) },
-      },
-      params: {},
-      stop: {
-        mode: ['ATR_DYNAMIC', 'FIXED_PERCENT', 'OFF'].includes(b.stop.mode) ? b.stop.mode : (() => { throw new Error('bad stop mode'); })(),
-        atrPeriod: num(b.stop.atrPeriod, { min: 2, max: 200, int: true }),
-        atrMult: num(b.stop.atrMult, { min: 0.1, max: 20 }),
-        minPct: num(b.stop.minPct, { min: 0.1, max: 90 }),
-        maxPct: num(b.stop.maxPct, { min: 0.1, max: 90 }),
-        fixedPct: num(b.stop.fixedPct, { min: 0.1, max: 90 }),
-      },
-      takeProfit: { enabled: !!b.takeProfit.enabled, pct: num(b.takeProfit.pct, { min: 0.1, max: 1000 }) },
-    };
-    if (next.stop.minPct > next.stop.maxPct) throw new Error('Min Stop % must be <= Max Stop %');
-    const P = { min: 2, max: 400, int: true };
-    if (name === 'TURTLE') next.params = { entryPeriod: num(b.params.entryPeriod, P), exitPeriod: num(b.params.exitPeriod, P), smaFilter: num(b.params.smaFilter, P) };
-    if (name === 'ADX') next.params = { adxPeriod: num(b.params.adxPeriod, P), threshold: num(b.params.threshold, { min: 1, max: 100 }), smaFilter: num(b.params.smaFilter, P) };
-    if (name === 'TSMOM') next.params = { lookback: num(b.params.lookback, P) };
-    if (name === 'QQQ_EMA_TREND') {
-      next.params = { fastEma: num(b.params.fastEma, P), slowEma: num(b.params.slowEma, P), sma200Filter: !!b.params.sma200Filter };
-      if (next.params.fastEma >= next.params.slowEma) throw new Error('Fast EMA must be < Slow EMA');
-    }
-    if (name === 'QQQ_TSMOM') next.params = { lookback: num(b.params.lookback, { min: 20, max: 400, int: true }), sma200Filter: !!b.params.sma200Filter };
-    if (name === 'QQQ_SMA200') next.params = { smaPeriod: num(b.params.smaPeriod, P) };
-    if (name === 'QQQ_TURTLE_50_20') next.params = { entryPeriod: num(b.params.entryPeriod, P), exitPeriod: num(b.params.exitPeriod, P) };
-    if (!STRATEGY_META[name].supportsShort) { next.amounts.PAPER.short = 0; next.amounts.LIVE.short = 0; } // long / cash only
+    const next = validateStrategySettings(name, req.body.settings, cur);
     const prevCfg = structuredClone(cur);
     store.config.strategies[name] = next;
     controller.onStrategyConfigChanged(name, prevCfg, next);

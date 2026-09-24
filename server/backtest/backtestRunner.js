@@ -64,42 +64,62 @@ export class BacktestRunner {
     return p.sessions(0);
   }
 
+  // Loads (or reuses, 30 min) candles + funding for the given timeframes. need: [{ s, tf }]
+  async loadData(config, days, need, onMsg = () => {}) {
+    const end = Date.now();
+    const start = end - days * DAY;
+    const c = (this.cache && this.cache.days === days && end - this.cache.at < 30 * 60_000) ? this.cache : { days, at: end, start, end, data: {}, funding: {} };
+    let k = 0;
+    for (const { s, tf } of need) {
+      if (c.data[tf]?.[s]) continue;
+      onMsg(`loading ${s} ${tf === US_SESSION ? 'US sessions' : tf}`, Math.round((k++ / (need.length + 3)) * 70));
+      let rows;
+      if (tf === US_SESSION || isSessionSymbol(s)) rows = await this.sessionCandles(s);
+      else rows = await this.klines(s, tf, c.start - (LIVE_WINDOW[tf] + 5) * TF_MS[tf], c.end); // live-equivalent warm-up before the start
+      (c.data[tf] ||= {})[s] = rows;
+    }
+    if (config.general.includeFunding) {
+      for (const s of new Set(need.map((x) => x.s))) {
+        if (c.funding[s]) continue;
+        onMsg(`loading ${s} funding history`);
+        try { c.funding[s] = await this.fundingRates(s, c.start, c.end); } catch (e) { c.funding[s] = []; this.log.warn(`backtest: ${s} funding history unavailable (${e.message})`, 'BACKTEST'); }
+      }
+    }
+    this.cache = c;
+    return c;
+  }
+
+  needFor(config, strategies) {
+    const need = new Map();
+    for (const st of strategies) for (const s of symbolsForStrategy(st)) need.set(`${s}|${timeframeOf(st, config)}`, { s, tf: timeframeOf(st, config) });
+    return [...need.values()];
+  }
+
+  // One strategy over [from, to) of the loaded period (built-in strategy or AI rule strategy via `custom`)
+  runOne({ config, ctx, strategy, custom = null, capital, compound, from = ctx.start, to = ctx.end }) {
+    const tf = custom ? custom.timeframe : timeframeOf(strategy, config);
+    return backtestStrategy({ strategy: strategy || custom?.meta?.label || 'AI', config, data: ctx.data[tf] || {}, funding: ctx.funding, start: from, end: to, capital, compound, custom });
+  }
+
+  // Full period + in-sample (first 70%) + out-of-sample (last 30%) - used by the AI improvement loop
+  runSplit(args, isFrac = 0.7) {
+    const { ctx } = args;
+    const cut = ctx.start + (ctx.end - ctx.start) * isFrac;
+    return { full: this.runOne(args), inSample: this.runOne({ ...args, from: ctx.start, to: cut }), outSample: this.runOne({ ...args, from: cut, to: ctx.end }), cut };
+  }
+
   async run({ days = 365, capital = 1_000_000, compound = true, strategies = ALL_STRATEGIES } = {}) {
     if (this.status.state === 'RUNNING') return { ok: false, msg: 'backtest already running' };
     const config = structuredClone(this.store.config); // snapshot of the user's current settings
-    const end = Date.now();
-    const start = end - days * DAY;
-    this.status = { state: 'RUNNING', progress: 0, msg: 'loading data', startedAt: end };
+    this.status = { state: 'RUNNING', progress: 0, msg: 'loading data', startedAt: Date.now() };
     try {
-      // which candle series are needed (per the configured timeframes)
-      const need = new Map(); // `${sym}|${tf}`
-      for (const st of strategies) for (const s of symbolsForStrategy(st)) need.set(`${s}|${timeframeOf(st, config)}`, { s, tf: timeframeOf(st, config) });
-      const data = {}; // tf -> sym -> candles
-      const funding = {};
-      let k = 0;
-      for (const { s, tf } of need.values()) {
-        this.status.msg = `loading ${s} ${tf === US_SESSION ? 'US sessions' : tf}`;
-        this.status.progress = Math.round((k++ / (need.size + 3)) * 70);
-        let rows;
-        if (tf === US_SESSION || isSessionSymbol(s)) rows = await this.sessionCandles(s);
-        else {
-          const warm = (LIVE_WINDOW[tf] + 5) * TF_MS[tf]; // live-equivalent indicator history before the start
-          rows = await this.klines(s, tf, start - warm, end);
-        }
-        (data[tf] ||= {})[s] = rows;
-      }
-      if (config.general.includeFunding) {
-        for (const s of new Set([...need.values()].map((x) => x.s))) {
-          this.status.msg = `loading ${s} funding history`;
-          try { funding[s] = await this.fundingRates(s, start, end); } catch (e) { funding[s] = []; this.log.warn(`backtest: ${s} funding history unavailable (${e.message})`, 'BACKTEST'); }
-        }
-      }
+      const ctx = await this.loadData(config, days, this.needFor(config, strategies), (msg, progress) => { this.status.msg = msg; if (progress != null) this.status.progress = progress; });
+      const { start, end, data } = ctx;
       const results = [];
       for (const [i, st] of strategies.entries()) {
         this.status.msg = `running ${st}`;
         this.status.progress = 70 + Math.round((i / strategies.length) * 30);
-        const tf = timeframeOf(st, config);
-        const r = backtestStrategy({ strategy: st, config, data: data[tf] || {}, funding, start, end, capital, compound });
+        const r = this.runOne({ config, ctx, strategy: st, capital, compound });
         r.assetClass = STRATEGY_CLASS[st];
         results.push(r);
         await new Promise((res) => setImmediate(res)); // keep the server responsive
