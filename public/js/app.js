@@ -367,7 +367,7 @@ function stratCard(s, st, sym, f) {
     add('숏 주문금액', isLongOnly(st) ? '롱 전용' : cfg.shortEnabled ? `${fNum(amt.short, 0)} USDT` : '꺼짐');
   }
   const tf = (s.scheduler || []).find((r) => r.strategy === st && r.symbol === sym);
-  const U = tf?.timeframeLabel === '4H' ? '봉(4시간)' : '일';
+  const U = { '4H': '봉(4시간)', '5M': '봉(5분)' }[tf?.timeframeLabel] || '일';
   if (st === 'TURTLE') {
     const pp = cfg.params;
     add(`${pp.entryPeriod}${U} 최고가`, fPrice(v.entryHigh, f)); add(`${pp.entryPeriod}${U} 최저가`, fPrice(v.entryLow, f));

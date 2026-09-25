@@ -11,6 +11,10 @@ import { historicalTradeSets, tradeFilterFrom, UNIVERSE_METHOD } from './histori
 import { universeConfig } from '../universe.js';
 
 const DAY = 86_400_000;
+// 5m candles: 288 per day per symbol -> the test period is capped (download size / Binance weight / run time)
+export const MAX_DAYS = { '5m': 90 };
+const CHART_CANDLES_MAX = 6000; // candles kept per series for the result chart (most recent)
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const FILE = path.join(DATA_DIR, 'backtest-last.json');
 const toCandle = (a) => ({ t: a[0], o: +a[1], h: +a[2], l: +a[3], c: +a[4], v: +a[5], T: a[6], qv: a[7] != null ? +a[7] : null }); // qv: quote volume (USDT)
 
@@ -27,11 +31,24 @@ export class BacktestRunner {
     try { const j = JSON.parse(fs.readFileSync(FILE, 'utf8')); this.last = j.result; this.candles = j.candles || {}; } catch { /* none */ }
   }
 
+  // Request pacing: at most 150 kline pages (weight 10 each) per minute = 1500 of Binance's 2400 weight/min,
+  // leaving room for the live terminal.
+  async pace() {
+    for (;;) {
+      const now = Date.now();
+      this._req = (this._req || []).filter((t) => now - t < 60_000);
+      if (this._req.length < 150) { this._req.push(now); return; }
+      await sleep(60_000 - (now - this._req[0]) + 50);
+    }
+  }
+
   async klines(symbol, interval, startTime, endTime) {
     const ms = TF_MS[interval];
     const out = new Map();
     let start = startTime;
-    for (let guard = 0; guard < 40 && start < endTime; guard++) {
+    const maxPages = Math.ceil((endTime - startTime) / (ms * 1500)) + 2;
+    for (let guard = 0; guard < maxPages && start < endTime; guard++) {
+      await this.pace();
       const rows = await this.rest.publicGet('/fapi/v1/klines', { symbol, interval, startTime: start, limit: 1500 });
       if (!Array.isArray(rows) || !rows.length) break;
       for (const r of rows) { const c = toCandle(r); out.set(c.t, c); }
@@ -69,7 +86,13 @@ export class BacktestRunner {
 
   // Loads (or reuses, 30 min) candles + funding for the given timeframes. need: [{ s, tf }]
   // `into`: extend an existing context (same period) instead of a possibly newer cache - keeps one job on one period
+  // Effective period: capped when a short timeframe is involved (MAX_DAYS)
+  effectiveDays(days, need) {
+    return need.reduce((d, x) => Math.min(d, MAX_DAYS[x.tf] ?? Infinity), days);
+  }
+
   async loadData(config, days, need, onMsg = () => {}, into = null) {
+    if (!into) days = this.effectiveDays(days, need);
     const end = Date.now();
     const start = end - days * DAY;
     const c = into || ((this.cache && this.cache.days === days && end - this.cache.at < 30 * 60_000) ? this.cache : { days, at: end, start, end, data: {}, funding: {} });
@@ -150,6 +173,7 @@ export class BacktestRunner {
     try {
       const ctx = await this.loadData(config, days, this.needFor(config, strategies), (msg, progress) => { this.status.msg = msg; if (progress != null) this.status.progress = progress; });
       const { start, end, data } = ctx;
+      if (ctx.days < days) this.log.warn(`Backtest period shortened to ${ctx.days} days (5m candles: max ${MAX_DAYS['5m']} days)`, 'BACKTEST');
       const results = [];
       for (const [i, st] of strategies.entries()) {
         this.status.msg = `running ${st}`;
@@ -163,11 +187,11 @@ export class BacktestRunner {
       // candles in the test period for the chart view
       const candles = {};
       for (const [tf, bySym] of Object.entries(data)) for (const [s, rows] of Object.entries(bySym)) {
-        candles[`${s}|${tf}`] = rows.filter((c) => c.t >= start - 60 * (TF_MS[tf] || DAY) && c.T < end).map(({ t, o, h, l, c, v, T }) => ({ t, o, h, l, c, v, T }));
+        candles[`${s}|${tf}`] = rows.filter((c) => c.t >= start - 60 * (TF_MS[tf] || DAY) && c.T < end).slice(-CHART_CANDLES_MAX).map(({ t, o, h, l, c, v, T }) => ({ t, o, h, l, c, v, T }));
       }
       this.candles = candles;
       this.last = {
-        ranAt: Date.now(), start, end, days, capital, compound, currency: 'KRW',
+        ranAt: Date.now(), start, end, days: ctx.days, requestedDays: days, capital, compound, currency: 'KRW',
         settings: { general: { takerFeePct: config.general.takerFeePct, slippagePct: config.general.slippagePct, includeFunding: config.general.includeFunding } },
         results: results.map((r) => ({ ...r, equity: thin(r.equity, 1500), benchmark: thin(r.benchmark, 1500) })), portfolio,
       };

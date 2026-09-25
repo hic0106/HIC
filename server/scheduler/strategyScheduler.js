@@ -12,7 +12,7 @@ import { timeframeOf, barsFor, scheduleTypeOf, TF_MS, TF_LABEL, US_SESSION } fro
 
 export const DEFAULT_SCHEDULER_CONFIG = {
   // A NEW entry is only executed if the signal candle closed at most this many minutes ago.
-  entryGraceMin: { '4h': 30, '1d': 120, [US_SESSION]: 120 },
+  entryGraceMin: { '5m': 3, '4h': 30, '1d': 120, [US_SESSION]: 120 },
   retrySec: 15, // fallback check / retry of transient skips (same candle only)
 };
 

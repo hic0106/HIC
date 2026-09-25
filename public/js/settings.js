@@ -1,6 +1,7 @@
 // Strategies tab: operational settings. Values are applied only when Save is pressed.
 import { $, $$, esc, api, toast } from './util.js';
 import { confirmDialog } from './modals.js';
+import { TF } from './ko.js';
 
 const LABEL = {
   TURTLE: '터틀 20/10 · 롱 + 숏', ADX: 'ADX 추세 · 롱 + 숏', TSMOM: '30일 모멘텀 · 롱 / 현금', RAYNER: 'EMA50 + MACD · 롱 + 숏',
@@ -90,7 +91,8 @@ function stratCol(name, c, mode, supportsShort) {
     <div class="fr"><label>레버리지 (배)</label>${numIn('leverage', c.leverage ?? 1, 1, `min="1" max="${c.timeframe ? 20 : 10}"`)}</div>
     <div class="note">포지션 규모 = 주문금액 × 레버리지. 같은 종목의 거래소 레버리지는 켜진 전략 중 가장 높은 값으로 설정. 변경은 봇 정지 상태에서만 가능.</div>
     ${c.timeframe ? `<div class="set-sec">신호 캔들</div>
-    <div class="fr"><label>캔들 (마감 기준)</label><select name="timeframe">${['4h', '1d'].map((t) => `<option value="${t}" ${t === c.timeframe ? 'selected' : ''}>${t === '4h' ? '4시간' : '1일'}</option>`).join('')}</select></div>` : ''}
+    <div class="fr"><label>캔들 (마감 기준)</label><select name="timeframe">${['5m', '4h', '1d'].map((t) => `<option value="${t}" ${t === c.timeframe ? 'selected' : ''}>${TF[t]}</option>`).join('')}</select></div>
+    ${c.timeframe === '5m' ? '<div class="note warn">5분봉: 신호가 많고 수수료·슬리피지 비중이 큽니다. 백테스트는 최대 90일.</div>' : ''}` : ''}
     <div class="set-sec">진입 / 청산 조건</div>
     ${PARAMS[name].map(([k, l, st]) => `<div class="fr"><label>${l}</label>${paramInput(k, c.params[k], st)}</div>`).join('')}
     <div class="set-sec">손절 (비상 Stop)</div>

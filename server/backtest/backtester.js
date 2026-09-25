@@ -18,7 +18,7 @@
 import { META, evaluateStrategy, symbolsForStrategy, exitFor, entryStop, stopReasonOf, trendCounts, recordTrendEntry } from '../strategyRegistry.js';
 import { timeframeOf, US_SESSION } from '../scheduler/timeframes.js';
 
-export const LIVE_WINDOW = { '4h': 1000, '1d': 500, [US_SESSION]: Infinity };
+export const LIVE_WINDOW = { '5m': 1000, '4h': 1000, '1d': 500, [US_SESSION]: Infinity };
 const dirOf = (side) => (side === 'LONG' ? 1 : -1);
 
 // custom (optional): { cfg, meta, timeframe, prepare(bars) -> (i) => signal } for AI rule strategies (server/ai/dsl.js)

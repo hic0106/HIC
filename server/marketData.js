@@ -11,8 +11,9 @@ export const CHART_INTERVALS = ['5m', '15m', '1h', '4h', '1d'];
 export const SESSION_INTERVAL = 'US1D'; // chart of US regular-session candles (QQQ signal data)
 const DAILY = '1d';
 const DAILY_HISTORY = 500;
-// Intraday closed-candle series kept for strategies (Turtle / ADX on 4h). 1000 x 4h ≈ 166 days (SMA200 warm-up).
-const STRATEGY_BARS = { '4h': 1000 };
+// Intraday closed-candle series kept for strategies (4h default, 5m optional). 1000 bars each (SMA200 warm-up):
+// 1000 x 4h ≈ 166 days, 1000 x 5m ≈ 3.5 days.
+const STRATEGY_BARS = { '5m': 1000, '4h': 1000 };
 
 // v = base asset volume, qv = quote asset volume (USDT turnover: REST index 7, ws field "q")
 export const toCandle = (a) => ({ t: a[0], o: +a[1], h: +a[2], l: +a[3], c: +a[4], v: +a[5], T: a[6], qv: a[7] != null ? +a[7] : null });
@@ -22,7 +23,7 @@ const wsCandle = (k) => ({ t: k.t, o: +k.o, h: +k.h, l: +k.l, c: +k.c, v: +k.v, 
 // (Top 20 ≈ 150 market streams on one connection; Binance allows 1024).
 // TODO(load): strategies only need 4h / 1d klines + ticker + markPrice for every watched symbol; 5m/15m/1h klines and
 // depth could be subscribed for the symbol selected in the UI only (would need runtime SUBSCRIBE / UNSUBSCRIBE).
-export const STRATEGY_STREAM_INTERVALS = ['4h', '1d'];
+export const STRATEGY_STREAM_INTERVALS = ['5m', '4h', '1d'];
 
 export class MarketData extends EventEmitter {
   constructor(symbols, logger, { getCalendar } = {}) {

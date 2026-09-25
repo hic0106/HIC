@@ -100,3 +100,22 @@ test('metrics: a drawdown still open at the end counts toward the longest drawdo
   const m = computeMetrics({ equity: eq, trades: [], capital: 1_000_000, timeline: eq.map((p) => p.t) });
   assert.equal(m.longestDrawdownDays, 3);
 });
+
+test('backtest: Turtle on 5m candles (signal on close, next-open fill) + 5m period cap', async () => {
+  const { BacktestRunner, MAX_DAYS } = await import('../server/backtest/backtestRunner.js');
+  const { validateStrategySettings } = await import('../server/strategyConfig.js');
+  const c = cfg();
+  const t = validateStrategySettings('TURTLE', { ...structuredClone(c.strategies.TURTLE), timeframe: '5m' }, c.strategies.TURTLE);
+  assert.equal(t.timeframe, '5m');
+  c.strategies.TURTLE = t;
+  const M5 = 300_000;
+  const closes = [...Array(300).fill(100), 110, 112, 115, 115, 115];
+  const bars = mk(closes, M5);
+  const r = await backtestStrategy({ strategy: 'TURTLE', config: c, data: { BTCUSDT: bars }, start: bars[250].t, end: bars.at(-1).T + 1, capital: 1_000_000, symbols: ['BTCUSDT'] });
+  assert.equal(r.timeframe, '5m');
+  assert.equal(r.openPositions.length, 1);
+  assert.equal(r.openPositions[0].entryTime, bars[301].t, 'filled at the open of the next 5m candle');
+  const runner = new BacktestRunner({ store: { config: c }, md: {}, log: { warn() {}, info() {}, error() {} }, rest: {} });
+  assert.equal(runner.effectiveDays(365, [{ s: 'BTCUSDT', tf: '5m' }, { s: 'BTCUSDT', tf: '1d' }]), MAX_DAYS['5m']);
+  assert.equal(runner.effectiveDays(365, [{ s: 'BTCUSDT', tf: '4h' }]), 365);
+});

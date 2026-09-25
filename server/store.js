@@ -30,7 +30,7 @@ export const DEFAULT_CONFIG = {
     stopWorkingType: 'CONTRACT_PRICE', // trigger source for Binance stops: CONTRACT_PRICE (last) | MARK_PRICE
     // StrategyScheduler: a NEW entry is executed only if its signal candle closed at most N minutes ago
     // (restart / late start). Exits are always executed. Stops never depend on this.
-    scheduler: { entryGraceMin: { '4h': 30, '1d': 120, US_SESSION: 120 }, retrySec: 15 },
+    scheduler: { entryGraceMin: { '5m': 3, '4h': 30, '1d': 120, US_SESSION: 120 }, retrySec: 15 },
   },
   // Crypto universe (server/universe.js): Binance USDⓈ-M perpetuals ranked by 24h quoteVolume.
   // watch = top watchTopN (+ symbols with positions / orders / stops), new entries only for the top tradeTopN.
@@ -67,7 +67,7 @@ export const DEFAULT_CONFIG = {
   strategies: {
     TURTLE: {
       enabled: true,
-      timeframe: '4h', // signal candles (4h | 1d); rules unchanged: close vs prior N-bar channel
+      timeframe: '4h', // signal candles (5m | 4h | 1d); rules unchanged: close vs prior N-bar channel
       shortEnabled: true,
       leverage: 1, amounts: amounts(300, 150),
       params: { entryPeriod: 20, exitPeriod: 10, smaFilter: 200 },

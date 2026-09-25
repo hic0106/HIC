@@ -7,7 +7,7 @@ const LC = window.LightweightCharts;
 const TZ = -new Date().getTimezoneOffset() * 60;
 const toT = (ms) => Math.floor(ms / 1000) + TZ;
 const SHORT = { TURTLE: '터틀', ADX: 'ADX', TSMOM: 'TSMOM', RAYNER: 'Rayner', QQQ_EMA_TREND: 'QQQ EMA', QQQ_TSMOM: 'QQQ TSMOM', QQQ_SMA200: 'QQQ SMA200', QQQ_TURTLE_50_20: 'QQQ 터틀50/20' };
-const TFL = { '4h': '4시간', '1d': '1일', US_SESSION: '미국 정규장' };
+const TFL = { '5m': '5분', '4h': '4시간', '1d': '1일', US_SESSION: '미국 정규장' };
 const SIDE = { LONG: '롱', SHORT: '숏' };
 const REASON = { STRATEGY_EXIT: '전략 청산', ATR_STOP: 'ATR 손절', FIXED_STOP: '고정 손절', TAKE_PROFIT: '익절', STRUCTURE_STOP: '구조 손절', RAYNER_HIST_TP: '히스토그램 목표 익절' };
 const noteKo = (n) => n.replace(/^(\w+): indicators never ready in the period \(insufficient history for current parameters\)/, '$1: 과거 데이터가 부족해 기간 내 신호 계산 불가').replace(/^(\w+): first (\d+) candle\(s\) of the period without a signal \(indicator warm-up \/ limited history\)/, '$1: 기간 초반 $2개 캔들은 데이터 부족으로 신호 없음').replace('no candles in the test period', '기간 내 캔들 없음')
@@ -80,7 +80,7 @@ async function load() {
 
 function renderSummary() {
   const r = B.res;
-  $('#btMeta').textContent = `${fDateTime(r.start)} → ${fDateTime(r.end)} · 전략별 ₩${fNum(r.capital, 0)} · ${r.compound ? '복리' : '고정 금액'} · 수수료 ${r.settings.general.takerFeePct}% · 슬리피지 ${r.settings.general.slippagePct}% · 펀딩 ${r.settings.general.includeFunding ? '반영' : '제외'} · 실행 ${fDateTime(r.ranAt)}`;
+  $('#btMeta').textContent = `${fDateTime(r.start)} → ${fDateTime(r.end)} · 전략별 ₩${fNum(r.capital, 0)} · ${r.compound ? '복리' : '고정 금액'} · 수수료 ${r.settings.general.takerFeePct}% · 슬리피지 ${r.settings.general.slippagePct}% · 펀딩 ${r.settings.general.includeFunding ? '반영' : '제외'} · 실행 ${fDateTime(r.ranAt)}${r.requestedDays > r.days ? ` · 5분봉 전략이 있어 기간을 ${r.days}일로 줄임` : ''}`;
   const bhRet = (x) => { const b = x.benchmark; return b.length ? (b[b.length - 1].equity / x.capital - 1) * 100 : null; };
   const row = (x) => { const m = x.metrics; return `<tr data-st="${x.strategy}" class="${B.sel === x.strategy ? 'sel' : ''}">
     <td class="l"><i class="sw-dot" style="background:${ST_COLOR[x.strategy]}"></i><b>${SHORT[x.strategy]}</b>${x.enabled ? '' : ' <span class="muted">(꺼진 전략)</span>'}</td>
@@ -151,7 +151,7 @@ async function loadCandles() {
   const rows = await api('GET', `/api/backtest/candles?symbol=${B.sym}&tf=${x.timeframe}`);
   const data = dedup((Array.isArray(rows) ? rows : []).map((c) => ({ time: toT(c.t), open: c.o, high: c.h, low: c.l, close: c.c })));
   B.candle.setData(data);
-  B.cChart.applyOptions({ timeScale: { timeVisible: x.timeframe === '4h' } });
+  B.cChart.applyOptions({ timeScale: { timeVisible: x.timeframe === '4h' || x.timeframe === '5m' } });
   const mk = [];
   for (const t of x.trades.filter((t) => t.symbol === B.sym)) {
     const L = t.side === 'LONG';
