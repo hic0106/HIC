@@ -125,7 +125,7 @@ test('timeframes: every Binance interval selectable for crypto strategies; caps 
   const { validateStrategySettings } = await import('../server/strategyConfig.js');
   const { barIntervalsFor, defaultGraceMin, KLINE_TIMEFRAMES } = await import('../server/scheduler/timeframes.js');
   const c = cfg();
-  for (const name of ['TURTLE', 'ADX', 'TSMOM', 'RAYNER']) for (const tf of KLINE_TIMEFRAMES) {
+  for (const name of ['TURTLE', 'ADX', 'TSMOM', 'RAYNER', 'TREND_RIDER']) for (const tf of KLINE_TIMEFRAMES) {
     assert.equal(validateStrategySettings(name, { ...structuredClone(c.strategies[name]), timeframe: tf }, c.strategies[name]).timeframe, tf, `${name} ${tf}`);
   }
   assert.equal(MAX_DAYS['1m'], 18);

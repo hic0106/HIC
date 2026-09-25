@@ -63,7 +63,7 @@ test('QQQ symbol metadata: TRADFI_INDEX, US session, limited native history', ()
   assert.equal(m.session, 'US_REGULAR_MARKET');
   assert.equal(m.nativeHistory, 'LIMITED');
   assert.deepEqual(strategiesForSymbol('QQQUSDT'), ['QQQ_EMA_TREND', 'QQQ_TSMOM', 'QQQ_SMA200', 'QQQ_TURTLE_50_20']);
-  assert.deepEqual(strategiesForSymbol('BTCUSDT'), ['TURTLE', 'ADX', 'TSMOM', 'RAYNER']);
+  assert.deepEqual(strategiesForSymbol('BTCUSDT'), ['TURTLE', 'ADX', 'TSMOM', 'RAYNER', 'TREND_RIDER']);
 });
 
 test('QQQ futures availability: filters parsed, missing symbol blocks only QQQ', async () => {

@@ -39,6 +39,7 @@ export function validateStrategySettings(name, b, cur) {
   if (name === 'TURTLE') next.params = { entryPeriod: num(b.params.entryPeriod, P), exitPeriod: num(b.params.exitPeriod, P), smaFilter: num(b.params.smaFilter, P) };
   if (name === 'ADX') next.params = { adxPeriod: num(b.params.adxPeriod, P), threshold: num(b.params.threshold, { min: 1, max: 100 }), smaFilter: num(b.params.smaFilter, P) };
   if (name === 'TSMOM') next.params = { lookback: num(b.params.lookback, P) };
+  if (name === 'TREND_RIDER') next.params = { entryPeriod: num(b.params.entryPeriod, P), trailPeriod: num(b.params.trailPeriod, P), trailMult: num(b.params.trailMult, { min: 0.5, max: 10 }), smaFilter: num(b.params.smaFilter, P) };
   if (name === 'RAYNER') {
     const q = b.params;
     next.params = {

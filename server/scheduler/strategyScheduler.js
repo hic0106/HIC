@@ -28,6 +28,7 @@ export function describeSignal(strategy, sig, scfg) {
     case 'TURTLE': return `${p.entryPeriod}H Breakout=${B(sig.longCond)} ${p.entryPeriod}L Breakdown=${B(sig.shortCond)} ${p.exitPeriod}L Exit=${B(sig.longExit)} ${p.exitPeriod}H Exit=${B(sig.shortExit)}`;
     case 'ADX': return `ADX=${n(v.adx, 1)} +DI=${n(v.plusDI, 1)} -DI=${n(v.minusDI, 1)} Long=${B(sig.longCond)} Short=${B(sig.shortCond)} LongExit=${B(sig.longExit)} ShortExit=${B(sig.shortExit)}`;
     case 'TSMOM': return `Mom${p.lookback}=${pct(v.momentumPct)} Long=${B(sig.longCond)} Exit=${B(sig.longExit)}`;
+    case 'TREND_RIDER': return `${p.entryPeriod}H/L=${n(v.entryHigh, 6)}/${n(v.entryLow, 6)} SMA${p.smaFilter}=${n(v.sma, 6)} LongTrail=${n(v.longTrail, 6)} ShortTrail=${n(v.shortTrail, 6)} Long=${B(sig.longCond)} Short=${B(sig.shortCond)} LongExit=${B(sig.longExit)} ShortExit=${B(sig.shortExit)}`;
     case 'RAYNER': return `EMA${p.emaPeriod}=${n(v.ema, 4)} Hist=${n(v.hist, 6)} LongTarget=${n(v.longTarget, 6)} ShortTarget=${n(v.shortTarget, 6)} Long=${B(sig.longCond)} Short=${B(sig.shortCond)} LongExit=${B(sig.longExit)} ShortExit=${B(sig.shortExit)}`;
     case 'QQQ_EMA_TREND': return `EMA${p.fastEma}=${n(v.fastEma)} EMA${p.slowEma}=${n(v.slowEma)} Long=${B(sig.longCond)} Exit=${B(sig.longExit)}`;
     case 'QQQ_TSMOM': return `Mom${p.lookback}=${pct(v.momentumPct)} Long=${B(sig.longCond)} Exit=${B(sig.longExit)}`;

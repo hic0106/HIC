@@ -60,7 +60,7 @@ export const DEFAULT_CONFIG = {
     boostRegimes: { LONG: ['BULL_TREND', 'NORMAL'], SHORT: ['BEAR_TREND'] },
     // optional hard maximum USDT per order (null = none)
     maxOrderUsdt: {
-      TURTLE: { LONG: null, SHORT: null }, ADX: { LONG: null, SHORT: null }, TSMOM: { LONG: null, SHORT: null }, RAYNER: { LONG: null, SHORT: null },
+      TURTLE: { LONG: null, SHORT: null }, ADX: { LONG: null, SHORT: null }, TSMOM: { LONG: null, SHORT: null }, RAYNER: { LONG: null, SHORT: null }, TREND_RIDER: { LONG: null, SHORT: null },
       QQQ_EMA_TREND: { LONG: null, SHORT: null }, QQQ_TSMOM: { LONG: null, SHORT: null }, QQQ_SMA200: { LONG: null, SHORT: null }, QQQ_TURTLE_50_20: { LONG: null, SHORT: null },
     },
   },
@@ -94,6 +94,17 @@ export const DEFAULT_CONFIG = {
     },
     // Rayner: EMA50 trend + MACD(1,50,9) histogram acceleration, structure stop, histogram target exit.
     // Off by default (backtest validation first).
+    // Trend Rider: N-bar breakout in the SMA200 direction, Chandelier trailing exit (HH(trail) - ATR(trail) x mult).
+    // Off by default (backtest validation first).
+    TREND_RIDER: {
+      enabled: false,
+      timeframe: '1d',
+      shortEnabled: true,
+      leverage: 1, amounts: amounts(200, 100),
+      params: { entryPeriod: 20, trailPeriod: 22, trailMult: 3, smaFilter: 200 },
+      stop: { mode: 'ATR_DYNAMIC', atrPeriod: 20, atrMult: 2.5, minPct: 8, maxPct: 20, fixedPct: 12 },
+      takeProfit: { enabled: false, pct: 50 },
+    },
     RAYNER: {
       enabled: false,
       timeframe: '4h',

@@ -4,7 +4,7 @@
 
 import { sma, ema, atr, adx, priorHigh, priorLow, logMomentum, macd, lowestLow, highestHigh } from './indicators.js';
 
-export const STRATEGIES = ['TURTLE', 'ADX', 'TSMOM', 'RAYNER'];
+export const STRATEGIES = ['TURTLE', 'ADX', 'TSMOM', 'RAYNER', 'TREND_RIDER'];
 
 export const STRATEGY_META = {
   TURTLE: { label: 'Turtle 20/10', short: 'T', supportsShort: true, exitRule: (p) => `${p.exitPeriod}봉 채널 이탈`,
@@ -18,6 +18,9 @@ export const STRATEGY_META = {
   // Momentum burst is an event (histogram acceleration); re-entries are limited per trend instead (maxEntriesPerTrend).
   RAYNER: { label: 'Rayner EMA50 + MACD', short: 'N', supportsShort: true, resetAfterStop: false, trendEntries: true, stopModes: ['STRUCTURE'],
     exitRule: (p) => `종가 EMA${p.emaPeriod} 반대편 · 히스토그램 0 반대 · 히스토그램 목표 도달` },
+  // Breakout with the big trend, Chandelier trailing exit: losses cut by the initial stop, winners ride until the trail breaks.
+  TREND_RIDER: { label: 'Trend Rider', short: 'R', supportsShort: true, resetAfterStop: false,
+    exitRule: (p) => `${p.trailPeriod}봉 최고가 − ATR×${p.trailMult} 이탈 (샹들리에)` },
 };
 
 // Exit reason for an emergency stop of the given stop mode.
@@ -68,6 +71,7 @@ export function minCandles(name, cfg) {
   if (name === 'TURTLE') return Math.max(p.entryPeriod, p.exitPeriod, p.smaFilter, atrP) + 2;
   if (name === 'ADX') return Math.max(p.adxPeriod * 2 + 2, p.smaFilter, atrP) + 2;
   if (name === 'TSMOM') return Math.max(p.lookback, atrP) + 2;
+  if (name === 'TREND_RIDER') return Math.max(p.entryPeriod, p.trailPeriod + 1, p.smaFilter, atrP) + 2;
   if (name === 'RAYNER') return Math.max(p.emaPeriod + p.slopeLookback, p.slowPeriod + p.signalPeriod + Math.max(p.momentumLookback, p.targetLookback), p.stopLookback, atrP) + 2;
   return 0;
 }
@@ -157,6 +161,23 @@ export function evaluate(name, candles, cfg) {
       histTarget: { LONG: longTarget, SHORT: shortTarget },
       trend: { lastBelow, lastAbove },
       view: { ema: e0, emaRef: eS, hist: h0, longTarget, shortTarget, longStop, shortStop, atr: atrVal },
+    };
+  }
+  if (name === 'TREND_RIDER') {
+    const entryHigh = priorHigh(candles, i, p.entryPeriod);
+    const entryLow = priorLow(candles, i, p.entryPeriod);
+    const smaVal = sma(closes, p.smaFilter)[i];
+    const trAtr = atr(candles, p.trailPeriod)[i];
+    const hh = highestHigh(candles, i, p.trailPeriod), ll = lowestLow(candles, i, p.trailPeriod);
+    if (smaVal == null || trAtr == null) return { ready: false, reason: 'Trend Rider warmup' };
+    const longTrail = hh - p.trailMult * trAtr, shortTrail = ll + p.trailMult * trAtr;
+    return {
+      ready: true, candleTime: k.t, close: k.c, atr: atrVal,
+      longCond: k.c > entryHigh && k.c > smaVal,
+      shortCond: k.c < entryLow && k.c < smaVal,
+      longExit: k.c < longTrail,
+      shortExit: k.c > shortTrail,
+      view: { entryHigh, entryLow, sma: smaVal, longTrail, shortTrail, atr: atrVal },
     };
   }
   throw new Error(`unknown strategy ${name}`);

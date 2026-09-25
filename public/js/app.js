@@ -9,8 +9,8 @@ import { mountPortfolio, update as updatePortfolio } from './portfolio.js';
 import { mountBacktest } from './backtest.js';
 import { SIDE, MODE, STATUS, EXIT, ORDER_STATUS, STRAT, TF, sigKo } from './ko.js';
 
-const SHORT = { TURTLE: '터틀', ADX: 'ADX', TSMOM: 'TSMOM', RAYNER: 'Rayner', QQQ_EMA_TREND: 'QQQ EMA 추세', QQQ_TSMOM: 'QQQ TSMOM', QQQ_SMA200: 'QQQ SMA200', QQQ_TURTLE_50_20: 'QQQ 터틀 50/20' };
-const CHIP = { TURTLE: '터틀', ADX: 'ADX', TSMOM: 'TSM', RAYNER: 'RAY', QQQ_EMA_TREND: 'EMA', QQQ_TSMOM: 'TSM', QQQ_SMA200: 'SMA', QQQ_TURTLE_50_20: 'T50' };
+const SHORT = { TURTLE: '터틀', ADX: 'ADX', TSMOM: 'TSMOM', RAYNER: 'Rayner', TREND_RIDER: '추세 라이더', QQQ_EMA_TREND: 'QQQ EMA 추세', QQQ_TSMOM: 'QQQ TSMOM', QQQ_SMA200: 'QQQ SMA200', QQQ_TURTLE_50_20: 'QQQ 터틀 50/20' };
+const CHIP = { TURTLE: '터틀', ADX: 'ADX', TSMOM: 'TSM', RAYNER: 'RAY', TREND_RIDER: 'RDR', QQQ_EMA_TREND: 'EMA', QQQ_TSMOM: 'TSM', QQQ_SMA200: 'SMA', QQQ_TURTLE_50_20: 'T50' };
 const stratsOf = (sym) => S.meta.strategiesBySymbol[sym] || [];
 const classOf = (sym) => S.meta.symbolMeta[sym]?.asset_class || 'CRYPTO';
 const isLongOnly = (st) => !S.meta.supportsShort[st];
@@ -391,6 +391,11 @@ function stratCard(s, st, sym, f) {
     add('SMA200', fPrice(v.sma, f), v.sma && s.symbols[sym].price < v.sma ? 'down' : 'up');
   } else if (st === 'TSMOM') {
     add('30일 모멘텀', v.momentumPct != null ? fPct(v.momentumPct) : '—', cls(v.momentumPct));
+  } else if (st === 'TREND_RIDER') {
+    const pp = cfg.params;
+    add(`${pp.entryPeriod}${U} 최고가 / 최저가`, `${fPrice(v.entryHigh, f)} / ${fPrice(v.entryLow, f)}`);
+    add(`SMA${pp.smaFilter}`, fPrice(v.sma, f), v.sma && s.symbols[sym].price < v.sma ? 'down' : 'up');
+    add('롱 추적 청산선', fPrice(v.longTrail, f), 'down'); add('숏 추적 청산선', fPrice(v.shortTrail, f), 'up');
   } else if (st === 'RAYNER') {
     const pp = cfg.params;
     const hd = (x) => (x == null ? '—' : Math.abs(x) >= 1 ? fNum(x, 3) : Number(x).toPrecision(4));

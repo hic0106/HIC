@@ -7,7 +7,7 @@ import { mountAi } from './ai.js';
 const LC = window.LightweightCharts;
 const TZ = -new Date().getTimezoneOffset() * 60;
 const toT = (ms) => Math.floor(ms / 1000) + TZ;
-const SHORT = { TURTLE: '터틀', ADX: 'ADX', TSMOM: 'TSMOM', RAYNER: 'Rayner', QQQ_EMA_TREND: 'QQQ EMA', QQQ_TSMOM: 'QQQ TSMOM', QQQ_SMA200: 'QQQ SMA200', QQQ_TURTLE_50_20: 'QQQ 터틀50/20' };
+const SHORT = { TURTLE: '터틀', ADX: 'ADX', TSMOM: 'TSMOM', RAYNER: 'Rayner', TREND_RIDER: '추세 라이더', QQQ_EMA_TREND: 'QQQ EMA', QQQ_TSMOM: 'QQQ TSMOM', QQQ_SMA200: 'QQQ SMA200', QQQ_TURTLE_50_20: 'QQQ 터틀50/20' };
 const TFL = TF;
 const SIDE = { LONG: '롱', SHORT: '숏' };
 const REASON = { STRATEGY_EXIT: '전략 청산', ATR_STOP: 'ATR 손절', FIXED_STOP: '고정 손절', TAKE_PROFIT: '익절', STRUCTURE_STOP: '구조 손절', RAYNER_HIST_TP: '히스토그램 목표 익절' };

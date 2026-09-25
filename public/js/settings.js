@@ -4,7 +4,7 @@ import { confirmDialog } from './modals.js';
 import { TF } from './ko.js';
 
 const LABEL = {
-  TURTLE: '터틀 20/10 · 롱 + 숏', ADX: 'ADX 추세 · 롱 + 숏', TSMOM: '30일 모멘텀 · 롱 / 현금', RAYNER: 'EMA50 + MACD · 롱 + 숏',
+  TURTLE: '터틀 20/10 · 롱 + 숏', ADX: 'ADX 추세 · 롱 + 숏', TSMOM: '30일 모멘텀 · 롱 / 현금', RAYNER: 'EMA50 + MACD · 롱 + 숏', TREND_RIDER: '돌파 + 샹들리에 추적 청산 · 롱 + 숏',
   QQQ_EMA_TREND: 'EMA 추세 · 롱 / 현금', QQQ_TSMOM: '장기 모멘텀 · 롱 / 현금',
   QQQ_SMA200: 'SMA200 추세 · 선택', QQQ_TURTLE_50_20: '느린 터틀 50/20 · 선택',
 };
@@ -12,6 +12,7 @@ const PARAMS = {
   TURTLE: [['entryPeriod', '진입 기간 (봉)', 1], ['exitPeriod', '청산 기간 (봉)', 1], ['smaFilter', '숏 허용 SMA 기간', 1]],
   ADX: [['adxPeriod', 'ADX 기간', 1], ['threshold', 'ADX 기준값', 0.5], ['smaFilter', '숏 허용 SMA 기간', 1]],
   TSMOM: [['lookback', '모멘텀 기간 (일)', 1]],
+  TREND_RIDER: [['entryPeriod', '돌파 기간 (봉)', 1], ['trailPeriod', '추적 청산 기간 (봉)', 1], ['trailMult', '추적 ATR 배수', 0.5], ['smaFilter', '추세 SMA 기간', 1]],
   RAYNER: [['emaPeriod', 'EMA 기간', 1], ['fastPeriod', 'MACD Fast', 1], ['slowPeriod', 'MACD Slow', 1], ['signalPeriod', 'MACD Signal', 1],
     ['slopeLookback', 'EMA 기울기 비교 (봉 전)', 1], ['momentumLookback', '히스토그램 비교 봉 수', 1], ['momentumMultiplier', '모멘텀 배수', 0.1],
     ['stopLookback', '구조 손절 기간 (봉)', 1], ['targetLookback', '히스토그램 목표 기간 (봉)', 1], ['maxEntriesPerTrend', '추세당 최대 진입', 1]],
@@ -108,7 +109,9 @@ function stratCol(name, c, mode, supportsShort) {
     <div class="set-sec">익절</div>
     <div class="fr"><label>익절 사용</label><span>${sw('tp.enabled', c.takeProfit.enabled)}</span></div>
     <div class="fr" data-dep="tp.enabled"><label>익절 %</label>${numIn('tp.pct', c.takeProfit.pct, 1, 'min="0.1"')}</div>
-    <div class="note">${name === 'RAYNER'
+    <div class="note">${name === 'TREND_RIDER'
+      ? '롱: 종가가 직전 N봉 최고가 돌파 + SMA 위. 숏: 직전 N봉 최저가 이탈 + SMA 아래. 청산(샹들리에): 종가 < 최근 추적 기간 최고가 − ATR×배수 (숏은 최저가 + ATR×배수). 수익이 날수록 청산선이 따라 올라가 추세를 끝까지 탑니다. 손절 = 진입 시 ATR 비상 손절.'
+      : name === 'RAYNER'
       ? '롱: 종가 > EMA, EMA 상승(비교 봉 전보다 높음), 히스토그램 > 0 이고 직전 N봉 최대값 × 배수 초과. 숏은 대칭. 구조 손절 = 신호 봉 포함 최근 N봉 최저가(롱)/최고가(숏), 진입 후 고정 (체결가 반대편이면 진입 취소). 청산: 히스토그램이 진입 때 고정한 최근 N봉 최대(롱)/최소(숏)값을 넘으면 익절, 종가가 EMA 반대편이거나 히스토그램 부호가 바뀌면 청산. 같은 추세에서 최대 진입 횟수 제한 (종가가 EMA 반대편에 마감하면 초기화).'
       : '손절가 = 진입가 × (1 ∓ ATR×배수/진입가, 최소~최대 % 범위). 신규 진입부터 적용, 보유 포지션 손절가는 유지. 전략 청산과 손절 중 먼저 발생한 쪽으로 청산.'}</div>
     <div class="set-actions"><span class="dirty">● 저장 안 됨</span><button class="btn ghost small" data-act="revert">되돌리기</button><button class="btn primary" data-act="save">${name} 저장</button></div>

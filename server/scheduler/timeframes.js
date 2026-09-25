@@ -15,7 +15,7 @@ export const TF_LABEL = { '1m': '1M', '3m': '3M', '5m': '5M', '15m': '15M', '30m
 export const defaultGraceMin = (tf) => Math.max(1, Math.min(120, Math.round((TF_MS[tf] || H) / M / 2)));
 
 export const DEFAULT_TIMEFRAME = {
-  TURTLE: '4h', ADX: '4h', TSMOM: '1d', RAYNER: '4h',
+  TURTLE: '4h', ADX: '4h', TSMOM: '1d', RAYNER: '4h', TREND_RIDER: '1d',
   QQQ_EMA_TREND: US_SESSION, QQQ_TSMOM: US_SESSION, QQQ_SMA200: US_SESSION, QQQ_TURTLE_50_20: US_SESSION,
 };
 
