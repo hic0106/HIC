@@ -20,3 +20,22 @@ export const symbolsForStrategy = (st) => symbolsOfClass(STRATEGY_CLASS[st]);
 export function evaluateStrategy(name, candles, cfg) {
   return STRATEGY_CLASS[name] === 'CRYPTO' ? evaluateCrypto(name, candles, cfg) : evaluateTradfi(name, candles, cfg);
 }
+
+// Side the strategy would hold now had it been running: replays its entry/exit flags over the last `lookback`
+// closed candles (emergency stops ignored). null for per-trend entry strategies (Rayner: fixed targets / entry limits).
+// ponytail: re-evaluates every prefix (O(lookback × candles)); runs only on bot start.
+export function impliedSide(name, candles, cfg, lookback = 250) {
+  if (META[name]?.trendEntries) return null;
+  const allowShort = !!(cfg.shortEnabled && META[name]?.supportsShort);
+  let side = null, since = null;
+  for (let i = Math.max(1, candles.length - lookback); i <= candles.length; i++) {
+    const s = evaluateStrategy(name, candles.slice(0, i), cfg);
+    if (!s.ready) continue;
+    if ((side === 'LONG' && s.longExit) || (side === 'SHORT' && s.shortExit)) side = null;
+    if (!side) {
+      side = s.longCond ? 'LONG' : s.shortCond && allowShort ? 'SHORT' : null;
+      since = side ? s.candleTime : null;
+    }
+  }
+  return side ? { side, since } : null;
+}

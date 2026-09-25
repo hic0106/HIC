@@ -1,7 +1,7 @@
 // Trading engine: strategy evaluation, pre-trade checks, paper/live execution,
 // emergency stops, funding, PnL accounting and UI snapshot.
 import { BinanceClient, BinanceError, endpoints, floorToStep, fmtQty, roundToTick, fmtPrice } from './binance.js';
-import { ALL_STRATEGIES as STRATEGIES, META as STRATEGY_META, evaluateStrategy as evaluate, strategiesForSymbol, STRATEGY_CLASS, exitFor, entryStop, stopReasonOf, trendCounts, recordTrendEntry } from './strategyRegistry.js';
+import { ALL_STRATEGIES as STRATEGIES, META as STRATEGY_META, evaluateStrategy as evaluate, strategiesForSymbol, STRATEGY_CLASS, exitFor, entryStop, stopReasonOf, trendCounts, recordTrendEntry, impliedSide } from './strategyRegistry.js';
 import { SYMBOLS, emptyModeState } from './store.js';
 import { SYMBOL_META, assetClassOf, ASSET_CLASSES } from './assets.js';
 import { EventEmitter } from 'node:events';
@@ -289,7 +289,9 @@ export class Engine {
 
     if (this.runState !== 'RUNNING') return out('BOT_STOPPED', false);
     if (!scfg.enabled) return out('DISABLED', false);
-    if (slot.lastActedCandle === sig.candleTime) return out('ALREADY_EVALUATED', true);
+    // start sync: a flat slot is re-checked on bot start even if this candle was already evaluated
+    const startSync = !!opts.startSync && !slot.position && !slot.pending;
+    if (slot.lastActedCandle === sig.candleTime && !startSync) return out('ALREADY_EVALUATED', true);
     if (slot.lastSkip && slot.lastSkip.candle !== sig.candleTime) slot.lastSkip = null;
     const sym = symbol.replace('USDT', '');
     const tag = `${strategy} ${sym}`;
@@ -328,6 +330,14 @@ export class Engine {
     let side = null;
     if (sig.longCond) side = 'LONG';
     else if (sig.shortCond && scfg.shortEnabled && STRATEGY_META[strategy].supportsShort) side = 'SHORT';
+    // bot start: join the trend the strategy is already in (entered on an earlier candle, no exit since),
+    // unless this slot was closed after the latest candle close (stop / manual close: wait for the next signal)
+    let synced = null;
+    if (startSync && !exited && !side) {
+      const closedSince = this.ms().trades.some((t) => t.strategy === strategy && t.symbol === symbol && t.exitTime >= (opts.candleClose ?? sig.candleTime));
+      synced = closedSince ? null : impliedSide(strategy, candles, scfg);
+      if (synced) side = synced.side;
+    }
 
     if (!side) {
       slot.lastSignal = exited ? `EXIT (STRATEGY_EXIT)` : 'WAIT';
@@ -352,7 +362,7 @@ export class Engine {
       this.store.saveState();
       return out(exited ? `${exited} · MAX_TREND_ENTRIES ${side}` : `MAX_TREND_ENTRIES ${side}`, true);
     }
-    if (!allowEntry) {
+    if (!allowEntry && !startSync) {
       slot.lastSignal = `WAIT (stale ${side} signal skipped)`;
       slot.lastActedCandle = sig.candleTime;
       slot.lastSkip = null;
@@ -360,7 +370,9 @@ export class Engine {
       this.store.saveState();
       return out(exited ? `${exited} · STALE_ENTRY_SKIPPED ${side}` : `STALE_ENTRY_SKIPPED ${side}`, true);
     }
-    if (!slot.lastSkip) this.log.trade(`${tag} ${side} signal (${trigger})`, 'SIGNAL');
+    if (!slot.lastSkip) this.log.trade(synced
+      ? `${tag} ${side} start sync: strategy in ${side} since candle ${new Date(synced.since).toISOString()} with no exit — entering at current price (${trigger})`
+      : `${tag} ${side} signal (${trigger})`, synced ? 'START_SYNC' : 'SIGNAL');
     const r = await this.openPosition(strategy, symbol, side, sig);
     if (!r.ok && r.transient) return this.skip(slot, sig, r.code, r.msg);
     slot.lastActedCandle = sig.candleTime;

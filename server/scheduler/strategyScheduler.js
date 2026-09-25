@@ -14,6 +14,8 @@ export const DEFAULT_SCHEDULER_CONFIG = {
   // A NEW entry is only executed if the signal candle closed at most this many minutes ago.
   entryGraceMin: { '5m': 3, '4h': 30, '1d': 120, [US_SESSION]: 120 },
   retrySec: 15, // fallback check / retry of transient skips (same candle only)
+  // on START: flat slots join the position the strategy already holds (earlier signal, no exit since)
+  enterOnStart: true,
 };
 
 const B = (x) => (x ? 'True' : 'False');
@@ -130,7 +132,8 @@ export class StrategyScheduler {
       const e = this.entry(inst, mode);
       e.lastCheckAt = now;
       const closeT = last.T;
-      if (e.lastEvaluatedCandle != null && closeT <= e.lastEvaluatedCandle) return { result: 'DUPLICATE', duplicate: true };
+      const startSync = trigger === 'bot start' && this.scfg.enterOnStart !== false && !this.engine.slot(inst.strategy, inst.symbol, mode).position;
+      if (e.lastEvaluatedCandle != null && closeT <= e.lastEvaluatedCandle && !startSync) return { result: 'DUPLICATE', duplicate: true };
 
       const closedAt = closeT + 1;
       const graceMin = this.scfg.entryGraceMin[inst.timeframe] ?? defaultGraceMin(inst.timeframe);
@@ -139,7 +142,7 @@ export class StrategyScheduler {
       const missed = e.lastEvaluatedCandle != null ? bars.filter((c) => c.T > e.lastEvaluatedCandle && c.T < closeT).length : 0;
 
       const res = await this.engine.evaluateSlot(inst.strategy, inst.symbol, trigger, {
-        bars, allowEntry: !stale, candleClose: closedAt, staleReason: `closed ${ageMin.toFixed(0)}m ago > grace ${graceMin}m`,
+        bars, allowEntry: !stale, startSync, candleClose: closedAt, staleReason: `closed ${ageMin.toFixed(0)}m ago > grace ${graceMin}m`,
       });
       const final = res.final || res.result === 'NOT_READY';
       e.lastSeenCandle = closeT;

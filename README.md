@@ -178,6 +178,7 @@ Market Data → Turtle / ADX / TSMOM (기존 신호) → Controller (배수) →
 - Crypto 전략 Timeframe은 Strategies 탭 `Signal Timeframe`(4H / 1D)에서 바꿀 수 있습니다. 전략 규칙 자체는 동일합니다.
 - **중복 방지**: `(strategy, symbol, timeframe, candle close time)` 키를 `data/state.json`(모드별 `scheduler`)에 저장. 같은 캔들은 재시작 후에도 다시 평가·주문하지 않습니다.
 - **재시작 / 늦은 START**: 마지막 평가 캔들과 최신 마감 캔들을 비교해 **최신 캔들 1개만** 평가합니다(지표는 전체 히스토리로 재계산). 청산 신호는 늦어도 실행하고, 신규 진입은 캔들 마감 후 `entryGraceMin`(4H 30분, 1D·US_SESSION 120분, `config.json › general.scheduler`) 이내일 때만 실행합니다. 초과 시 `STALE_SIGNAL_SKIPPED` 로그 후 다음 캔들을 기다립니다.
+- **START 시 추세 합류** (`general.scheduler.enterOnStart`, 기본 켬): START를 누르면 포지션이 없는 슬롯은 최근 250봉을 전략 규칙대로 재생해, 전략이 이미 들고 있어야 할 포지션(이전 봉의 진입 신호 이후 청산 신호 없음)이 있으면 현재가로 진입합니다(`START_SYNC` 로그). 재생에서 비상 Stop은 제외하며, 마지막 마감 이후 청산된 슬롯(Stop·수동 청산)은 다음 신호를 기다립니다. Rayner는 제외. 서버 재시작(init)은 기존처럼 유예시간 규칙을 따릅니다.
 - 일시적 실패(데이터 지연, 주문 결과 UNKNOWN 등)는 같은 캔들 안에서 15초마다 재시도하며, 결과 UNKNOWN 주문은 재전송하지 않고 clientOrderId로 조회합니다.
 - **Signal Log** (Scheduler 탭, `data/signals/signals-YYYY-MM-DD.jsonl`): 신호가 없어도 모든 평가를 기록합니다. 예: `TURTLE BTCUSDT 4H Candle Closed C=… 20H Breakout=False 20L Breakdown=False 10L Exit=False 10H Exit=False Result=HOLD`.
 

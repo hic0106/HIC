@@ -227,13 +227,39 @@ test('scheduler: restart catch-up skips stale entries but still executes exits',
   const { engine, sch, logs, signalLog } = setup({ md });
   await engine.openPosition('TURTLE', 'ETHUSDT', 'LONG', { atr: 1 });
   md.s.ETHUSDT.last = 99; // keep emergency stop out of the way
-  await sch.catchUp('bot start');
+  await sch.catchUp('init'); // server restart while running (not a START press)
   assert.equal(orders(engine, 'TURTLE', 'BTCUSDT').length, 0, 'stale breakout not chased');
   assert.ok(logs.some((l) => l.code === 'STALE_SIGNAL_SKIPPED'));
   assert.equal(engine.slot('TURTLE', 'ETHUSDT').position, null, 'exit still executed');
   const rec = signalLog.recent().find((x) => x.strategy === 'TURTLE' && x.symbol === 'BTCUSDT');
   assert.match(rec.result, /STALE_ENTRY_SKIPPED LONG/);
   assert.equal(rec.stale, true);
+});
+
+test('scheduler: START joins the trend the strategy already holds (earlier breakout, no exit since)', async () => {
+  const now = Date.now();
+  const md = fakeMarket(now);
+  const lastClose = Math.floor(now / H4) * H4 - 3 * H4; // latest candle closed long ago (stale)
+  // BTC: breakout 5 candles ago, then holding above the 10-bar exit channel -> strategy is LONG
+  md.s.BTCUSDT.bars['4h'] = series([...flat(290), 110, 111, 112, 111, 112, 113, 112, 113, 112, 113], H4, lastClose);
+  // ETH: same trend, but this slot was closed after the latest candle close (stop / manual) -> wait
+  md.s.ETHUSDT.bars['4h'] = series([...flat(290), 110, 111, 112, 111, 112, 113, 112, 113, 112, 113], H4, lastClose);
+  md.s.BTCUSDT.last = 113; md.s.ETHUSDT.last = 113;
+  const { engine, sch, logs, store } = setup({ md });
+  engine.ms().trades.unshift({ strategy: 'TURTLE', symbol: 'ETHUSDT', side: 'LONG', exitTime: now, netPnl: -1 });
+  await sch.catchUp('bot start');
+  assert.equal(engine.slot('TURTLE', 'BTCUSDT').position?.side, 'LONG');
+  assert.ok(logs.some((l) => l.code === 'START_SYNC' && /TURTLE BTC/.test(l.msg)));
+  assert.equal(engine.slot('TURTLE', 'ETHUSDT').position, null, 'closed since the last candle: no re-entry');
+  assert.equal(engine.slot('TURTLE', 'XRPUSDT').position, null, 'flat market: nothing to join');
+  // pressing START again: no duplicate order
+  await sch.catchUp('bot start');
+  assert.equal(orders(engine, 'TURTLE', 'BTCUSDT').length, 1);
+  // disabled -> old behaviour (stale entry skipped)
+  const s2 = setup({ md });
+  s2.store.config.general.scheduler = { ...s2.store.config.general.scheduler, enterOnStart: false };
+  await s2.sch.catchUp('bot start');
+  assert.equal(s2.engine.slot('TURTLE', 'BTCUSDT').position, null);
 });
 
 test('signal log: every evaluation recorded, also HOLD', async () => {
