@@ -30,6 +30,12 @@ export class BinanceError extends Error {
 
 const TS_MARGIN_MS = 500; // sign 0.5 s in the past: tolerates clock drift ahead (limit +1 s) within recvWindow 5 s
 
+// Binance ids (orderId, tranId, ...) can exceed 2^53 (e.g. ETHUSDT orderId 8389766284893326977): JSON.parse would
+// round them. Integers beyond Number.MAX_SAFE_INTEGER become exact strings; everything else parses as usual.
+export function parseJson(text) {
+  return JSON.parse(text.replace(/([:\[,]\s*)(-?\d{16,})(?=\s*[,}\]])/g, (m, pre, d) => (Number.isSafeInteger(Number(d)) ? m : `${pre}"${d}"`)));
+}
+
 export class BinanceClient {
   constructor({ restBase, spotBase = null, apiKey = '', apiSecret = '', timeoutMs = 10000 }) {
     this.restBase = restBase;
@@ -57,7 +63,7 @@ export class BinanceClient {
     }
     const text = await res.text();
     let body;
-    try { body = text ? JSON.parse(text) : null; } catch { body = text; }
+    try { body = text ? parseJson(text) : null; } catch { body = text; }
     if (!res.ok) {
       const code = body && typeof body === 'object' ? body.code : null;
       const msg = body && typeof body === 'object' ? body.msg : String(text).slice(0, 200);

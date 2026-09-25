@@ -10,7 +10,7 @@ process.env.HIC_LOG_STDOUT = '0';
 
 const { sma, atr, adx, priorHigh, priorLow, logMomentum } = await import('../server/indicators.js');
 const { evaluate, stopDistancePct } = await import('../server/strategies.js');
-const { floorToStep, BinanceError } = await import('../server/binance.js');
+const { floorToStep, BinanceError, parseJson } = await import('../server/binance.js');
 const { Store, DEFAULT_CONFIG } = await import('../server/store.js');
 const { Logger } = await import('../server/logger.js');
 const { Engine } = await import('../server/engine.js');
@@ -364,4 +364,12 @@ test('binance client: wallet balance of all wallets is a signed read on the spot
   assert.equal(url.searchParams.get('quoteAsset'), 'USDT');
   assert.ok(url.searchParams.get('signature'));
   await assert.rejects(new BinanceClient({ restBase: 'x', apiKey: 'k', apiSecret: 's' }).walletBalance(), /not available/);
+});
+
+test('binance: ids above 2^53 stay exact (strings), other numbers unchanged', () => {
+  const r = parseJson('{"orderId":8389766284893326977,"small":161361618442,"time":1790341487428,"price":"1.5","ids":[9007199254740993,12]}');
+  assert.equal(r.orderId, '8389766284893326977');
+  assert.equal(r.small, 161361618442);
+  assert.equal(r.time, 1790341487428);
+  assert.deepEqual(r.ids, ['9007199254740993', 12]);
 });
