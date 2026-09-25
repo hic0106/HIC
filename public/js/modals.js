@@ -71,7 +71,7 @@ export async function openApiModal() {
     const r = await api('POST', '/api/secrets/test');
     $('#apiTest').disabled = false; $('#apiDel').disabled = false;
     out.innerHTML = r.success
-      ? `<span class="up">✔ 연결됨</span> · 자산 ${fUsd(r.account?.equity)} · 주문 가능 ${fUsd(r.account?.available)} USDT<br>포지션 모드: ${r.hedgeMode ? '<span class="up">양방향(Hedge)</span>' : '<span class="down">단방향(One-way)</span>'} · 레버리지 ${Object.entries(r.leverage || {}).map(([k, v]) => `${k.replace('USDT', '')} ${v}x`).join(' ')}`
+      ? `<span class="up">✔ 연결됨</span> · 자산 ${fUsd(r.account?.equity)} · 주문 가능 (선물) ${fUsd(r.account?.available)} USDT<br>포지션 모드: ${r.hedgeMode ? '<span class="up">양방향(Hedge)</span>' : '<span class="down">단방향(One-way)</span>'} · 레버리지 ${Object.entries(r.leverage || {}).map(([k, v]) => `${k.replace('USDT', '')} ${v}x`).join(' ')}`
       : `<span class="down">✖ ${esc(r.msg || r.status)}</span>`;
     $('#apiStatus').innerHTML = statusHtml(r);
     $('#apiHedge').style.display = r.hedgeMode === false ? '' : 'none';

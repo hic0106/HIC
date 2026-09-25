@@ -95,7 +95,7 @@ function renderSummary() {
       : kpi('총 자산 <i>USDT</i>', fUsd(s.equity), '', d.exchange.live ? `실전 · Binance ${esc(d.exchange.source === 'WS' ? '실시간' : d.exchange.source === 'REST' ? '조회' : d.exchange.source)}${d.exchange.wallets?.error ? ' · <span class="warn">전체 지갑 조회 실패</span>' : ''}` : '모의투자', true),
     kpi('오늘 손익 <i>09시 기준</i>', fSigned(s.todayPnl), cls(s.todayPnl), s.baseCapital ? fPct(s.todayPnl / s.baseCapital * 100) : '', true),
     kpi('총 수익률', s.totalReturnPct != null ? fPct(s.totalReturnPct) : '—', cls(s.totalReturnPct), s.baseCapital ? `원금 ${fUsd(s.baseCapital, 0)}` : '원금 미설정', true),
-    kpi('주문 가능', fUsd(s.available)), kpi('투자 원금', fUsd(s.invested), '', '진입가 기준'), kpi('포지션 가치', fUsd(s.positionValue), '', '현재가 기준'),
+    kpi('주문 가능 (선물)', fUsd(s.available), '', '현물 USDT는 선물로 옮겨야 사용'), kpi('투자 원금', fUsd(s.invested), '', '진입가 기준'), kpi('포지션 가치', fUsd(s.positionValue), '', '현재가 기준'),
     kpi('평가손익', fSigned(s.unrealized), cls(s.unrealized), '거래소 기준'), kpi('오늘 실현손익', fSigned(s.realizedToday), cls(s.realizedToday), s.realizedTodaySource === 'BINANCE_INCOME' ? 'Binance 정산 기준' : '봇 장부 기준'),
     kpi('누적 손익', fSigned(s.totalPnl), cls(s.totalPnl), '수수료·펀딩 반영'),
     kpi('고점 대비 하락', d.drawdown.currentPct != null ? `−${d.drawdown.currentPct.toFixed(2)}%` : '—', d.drawdown.currentPct > 0 ? 'down' : '', d.drawdown.maxPct != null ? `최대 −${d.drawdown.maxPct.toFixed(2)}%` : '기록 없음'),
@@ -153,7 +153,7 @@ function renderExchange() {
   $('#pfExSrc').textContent = e.live ? `Binance · ${e.source === 'WS' ? '실시간 반영' : '주기 조회'}${e.stream ? ' · 실시간 연결 ' + ({ CONNECTED: '연결됨', CONNECTING: '연결 중', DISCONNECTED: '끊김', ERROR: '오류', OFF: '꺼짐' }[e.stream] || e.stream) : ''}${e.updatedAt ? ' · ' + fZone(e.updatedAt) : ''}` : '모의투자 가상 계좌';
   $('#pfExchange').innerHTML = `<table class="t compact kv pf-kv"><tbody>
       <tr><td>지갑 잔고</td><td>${fUsd(e.wallet)}</td><td>USDT 마진 잔고</td><td>${fUsd(e.marginBalance)}</td></tr>
-      <tr><td>주문 가능</td><td>${fUsd(e.available)}</td><td>평가손익</td><td class="${cls(e.unrealized)}">${fSigned(e.unrealized)}</td></tr>
+      <tr><td>주문 가능 (선물)</td><td>${fUsd(e.available)}</td><td>평가손익</td><td class="${cls(e.unrealized)}">${fSigned(e.unrealized)}</td></tr>
       ${e.error ? `<tr><td colspan="4" class="l down">${esc(e.error)}</td></tr>` : ''}</tbody></table>
     ${assetsHtml(e)}
     ${e.positions.length ? `<table class="t compact"><thead><tr><th>종목</th><th>방향</th><th>수량</th><th>진입가</th><th>현재가</th><th>포지션 금액</th><th>증거금</th><th>평가손익</th><th>청산가</th><th>레버리지</th></tr></thead><tbody>
