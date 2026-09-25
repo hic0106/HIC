@@ -151,19 +151,45 @@ export class PortfolioService extends EventEmitter {
     if (!this.isLive() || this._walletBusy) return;
     if (soon && this.wallets && this.now() - this.wallets.at < 60_000) return;
     this._walletBusy = true;
+    const c = this.engine.liveClient;
     try {
-      const rows = await this.engine.liveClient.walletBalance();
-      const list = (Array.isArray(rows) ? rows : []).map((w) => ({
-        name: w.walletName, balance: Number(w.balance) || 0, active: w.activate !== false,
-        assets: (w.assetBalances || []).map((b) => ({ asset: b.asset, free: Number(b.free) || 0, locked: Number(b.locked) || 0, freeze: Number(b.freeze) || 0 })).filter((b) => b.free + b.locked + b.freeze > 0),
-      }));
-      this.wallets = { at: this.now(), error: null, list, total: list.reduce((s, w) => s + w.balance, 0) };
+      let list, source = 'WALLET_API', error = null;
+      try {
+        const rows = await c.walletBalance();
+        list = (Array.isArray(rows) ? rows : []).map((w) => ({
+          name: w.walletName, balance: Number(w.balance) || 0, active: w.activate !== false,
+          assets: (w.assetBalances || []).map((b) => ({ asset: b.asset, free: Number(b.free) || 0, locked: Number(b.locked) || 0, freeze: Number(b.freeze) || 0 })).filter((b) => b.free + b.locked + b.freeze > 0),
+        }));
+      } catch (e) {
+        // fallback: spot account (/api/v3/account) + futures wallet assets, priced with <ASSET>USDT tickers
+        error = `전체 지갑 API: ${e.message}`;
+        source = 'SPOT+FUTURES';
+        list = [];
+        try {
+          const acct = await c.spotAccount();
+          const bal = (acct.balances || []).map((b) => ({ asset: b.asset, free: Number(b.free) || 0, locked: Number(b.locked) || 0, freeze: 0 })).filter((b) => b.free + b.locked > 0);
+          const px = await this.assetPrices(bal.map((b) => b.asset));
+          list.push({ name: 'Spot', balance: bal.reduce((t, b) => t + (b.free + b.locked) * (px[b.asset] ?? 0), 0), active: true, assets: bal, unpriced: bal.filter((b) => px[b.asset] == null).map((b) => b.asset) });
+        } catch (e2) { error += ` · 현물 계좌: ${e2.message}`; }
+        await this.priceAssets().catch(() => {});
+        const fut = this.exchange?.assetsTotalUsdt ?? this.exchange?.marginBalance ?? null;
+        if (fut != null) list.push({ name: 'USDⓈ-M Futures', balance: fut, active: true, assets: [] });
+      }
+      this.wallets = { at: this.now(), error, source, list, total: list.length ? list.reduce((t, w) => t + w.balance, 0) : null };
+      if (error && (!this._walletErr || this.now() - this._walletErr > 600_000)) { this._walletErr = this.now(); this.log.warn(`Wallet balance: ${error}`, 'PORTFOLIO'); }
     } catch (e) {
       this.wallets = { ...(this.wallets || { list: [], total: null }), at: this.now(), error: e.message };
       if (!this._walletErr || this.now() - this._walletErr > 600_000) { this._walletErr = this.now(); this.log.warn(`Wallet balance lookup failed: ${e.message}`, 'PORTFOLIO'); }
     } finally {
       this._walletBusy = false;
     }
+  }
+
+  // Compact wallet summary for the top bar (null outside LIVE)
+  walletSummary() {
+    if (!this.isLive() || !this.wallets) return null;
+    const w = this.wallets;
+    return { total: w.total, source: w.source, error: w.error, at: w.at, futures: this.exchange?.marginBalance ?? this.engine.live.account?.equity ?? null };
   }
 
   // ACCOUNT_UPDATE: a.B balances { a, wb, cw, bc }, a.P positions { s, pa, ep, up, ps, ... }, a.m reason

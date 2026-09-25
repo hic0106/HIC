@@ -54,6 +54,7 @@ const fullSnapshot = () => {
   try { s.scheduler = scheduler.snapshot(); } catch (e) { s.scheduler = []; log.warn(`scheduler snapshot: ${e.message}`); }
   try { s.risk = risk.status(); } catch { s.risk = null; }
   try { s.universe = universe.snapshot(); } catch { s.universe = null; }
+  try { s.wallets = portfolio.walletSummary(); } catch { s.wallets = null; }
   try { const r = portfolio.recon; s.reconciliation = { ok: r.ok, warnings: r.warnings, na: r.na || null }; } catch { s.reconciliation = null; }
   return s;
 };

@@ -218,7 +218,12 @@ function renderTop(s) {
   $$('#modeSwitch button').forEach((b) => { b.classList.toggle('on', b.dataset.mode === s.mode); b.disabled = s.runState === 'RUNNING'; });
   document.title = `${a.equity != null ? fUsd(a.equity, 0) : '—'} · ${MODE[s.mode]} ${STATUS[s.runState] || s.runState} — HIC`;
 
-  $('#kEquity').textContent = a.equity != null ? fUsd(a.equity) : '—';
+  // LIVE: total of every Binance wallet (spot + futures + ...); futures USDT margin shown below it
+  const w = live ? s.wallets : null;
+  $('#kEquity').textContent = w?.total != null ? fUsd(w.total) : a.equity != null ? fUsd(a.equity) : '—';
+  $('#kEqCcy').textContent = w?.total != null ? 'USDT · 전체 지갑' : 'USDT';
+  $('#kEqSub').textContent = w?.total != null ? `선물 ${fUsd(a.equity)}` : live && w?.error ? '전체 지갑 조회 실패 · 선물만' : '';
+  $('#kEqSub').title = w?.error || '';
   setSigned($('#kToday'), a.todayPnl, fSigned(a.todayPnl));
   $('#kTodayPct').textContent = a.baseCapital ? fPct(a.todayPnl / a.baseCapital * 100) : '';
   setSigned($('#kReturn'), a.totalReturnPct, a.totalReturnPct != null ? fPct(a.totalReturnPct) : '—');

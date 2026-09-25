@@ -90,10 +90,11 @@ function renderSummary() {
   $('#pfWarn').innerHTML = warn ? `<div class="pf-banner"><b>포지션 불일치 경고</b> ${d.reconciliation.warnings.map((w) => esc(w.replace('Exchange Qty', '거래소 수량').replace('Internal', '봇 장부').replace('Diff', '차이').replace(' LONG ', ' 롱 ').replace(' SHORT ', ' 숏 '))).join(' · ')} <span class="muted">— 거래소 포지션이 봇 장부와 다릅니다 (수동 거래 또는 외부 변경). 숨기거나 자동으로 고치지 않습니다.</span></div>` : '';
   const ctl = d.controllerMode && d.controllerMode !== 'OFF' ? `<span class="tag OFF" title="자동 조절은 신규 진입 금액만 바꿉니다">자동조절 ${esc({ OBSERVE: '관찰만', PAPER_AUTO: '모의 자동', LIVE_APPROVAL: '실전 승인제' }[d.controllerMode] || d.controllerMode)}</span>` : '';
   $('#pfSummary').innerHTML = [
-    kpi('총 자산 <i>USDT</i>', fUsd(s.equity), '', d.exchange.live ? `실전 · Binance ${esc(d.exchange.source === 'WS' ? '실시간' : d.exchange.source === 'REST' ? '조회' : d.exchange.source)}` : '모의투자', true),
+    d.exchange.live && d.exchange.wallets?.total != null
+      ? kpi('총 자산 <i>USDT · 전체 지갑</i>', fUsd(d.exchange.wallets.total), '', `선물 ${fUsd(s.equity)}${d.exchange.wallets.error ? ' · <span class="warn" title="' + esc(d.exchange.wallets.error) + '">일부 조회 실패</span>' : ''}`, true)
+      : kpi('총 자산 <i>USDT</i>', fUsd(s.equity), '', d.exchange.live ? `실전 · Binance ${esc(d.exchange.source === 'WS' ? '실시간' : d.exchange.source === 'REST' ? '조회' : d.exchange.source)}${d.exchange.wallets?.error ? ' · <span class="warn">전체 지갑 조회 실패</span>' : ''}` : '모의투자', true),
     kpi('오늘 손익 <i>09시 기준</i>', fSigned(s.todayPnl), cls(s.todayPnl), s.baseCapital ? fPct(s.todayPnl / s.baseCapital * 100) : '', true),
     kpi('총 수익률', s.totalReturnPct != null ? fPct(s.totalReturnPct) : '—', cls(s.totalReturnPct), s.baseCapital ? `원금 ${fUsd(s.baseCapital, 0)}` : '원금 미설정', true),
-    ...(d.exchange.live && d.exchange.wallets?.total != null ? [kpi('Binance 전체 자산 <i>USDT</i>', fUsd(d.exchange.wallets.total), '', '모든 지갑 합계')] : []),
     kpi('주문 가능', fUsd(s.available)), kpi('투자 원금', fUsd(s.invested), '', '진입가 기준'), kpi('포지션 가치', fUsd(s.positionValue), '', '현재가 기준'),
     kpi('평가손익', fSigned(s.unrealized), cls(s.unrealized), '거래소 기준'), kpi('오늘 실현손익', fSigned(s.realizedToday), cls(s.realizedToday), s.realizedTodaySource === 'BINANCE_INCOME' ? 'Binance 정산 기준' : '봇 장부 기준'),
     kpi('누적 손익', fSigned(s.totalPnl), cls(s.totalPnl), '수수료·펀딩 반영'),
@@ -169,7 +170,7 @@ function assetsHtml(e) {
     ${e.assets.map((a) => `<tr><td class="l"><b>${esc(a.asset)}</b></td><td>${fNum(a.wallet, 6)}</td><td>${fNum(a.margin, 6)}</td><td class="${cls(a.unrealized)}">${fSigned(a.unrealized, 4)}</td><td>${a.price != null ? fNum(a.price, 4) : '—'}</td><td>${a.valueUsdt != null ? fUsd(a.valueUsdt) : '<span class="muted">가격 없음</span>'}</td><td>${a.asset !== 'USDT' ? `<button class="btn small ghost" data-sell="FUTURES:${esc(a.asset)}">판매</button>` : ''}</td></tr>`).join('')}</tbody></table>` : '';
   const w = e.wallets;
   const all = !w ? '<div class="empty">Binance 전체 지갑 조회 중…</div>'
-    : w.error && !w.list.length ? `<div class="empty down">전체 지갑 조회 실패: ${esc(w.error)}</div>`
+    : w.error && !w.list.length ? `<div class="empty down">전체 지갑 조회 실패: ${esc(w.error)}<br><span class="muted">API 키 권한(Enable Reading)과 IP 제한을 확인하세요</span></div>`
     : `<div class="sub-h">Binance 전체 자산 <span class="muted">모든 지갑 · USDT 환산 · 합계 <b>${fUsd(w.total)}</b>${w.at ? ' · ' + fZone(w.at) : ''}${w.error ? ` · <span class="warn">마지막 조회 실패: ${esc(w.error)}</span>` : ''}</span></div>
     <table class="t compact"><thead><tr><th>지갑</th><th>잔고 (USDT)</th><th class="l">자산</th></tr></thead><tbody>
     ${w.list.filter((x) => x.balance > 0 || x.assets.length).map((x) => `<tr><td class="l">${esc(WALLET_KO[x.name] || x.name)}</td><td>${fUsd(x.balance)}</td><td class="l muted">${x.assets.slice(0, 12).map((b) => `${esc(b.asset)} ${fNum(b.free + b.locked + b.freeze, 6)}${x.name === 'Spot' && b.free > 0 ? (b.asset === 'USDT' ? ` <button class="btn small ghost" data-move="1">선물로 이동</button>` : ` <button class="btn small ghost" data-sell="SPOT:${esc(b.asset)}">판매</button>`) : ''}`).join(' · ')}</td></tr>`).join('') || '<tr><td colspan="3" class="muted">잔고 없음</td></tr>'}</tbody></table>`;

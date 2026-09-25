@@ -403,3 +403,22 @@ test('portfolio: income rows sharing the last timestamp are not skipped', async 
   assert.equal(inc.length, 2);
   assert.equal(inc.filter((r) => r.tranId === '1').length, 1, 'no duplicates');
 });
+
+test('portfolio: total of all wallets (wallet API), fallback spot + futures when the wallet API is refused', async () => {
+  const { pf, engine, md } = liveSetup();
+  md.rest = { tickerPrices: async () => [{ symbol: 'BTCUSDT', price: '84000' }] };
+  engine.liveClient.walletBalance = async () => [{ walletName: 'Spot', balance: '115.2' }, { walletName: 'USDⓈ-M Futures', balance: '4.79' }, { walletName: 'Funding', balance: '0' }];
+  await pf.refreshExchange('t');
+  await pf.refreshWallets();
+  assert.equal(pf.wallets.source, 'WALLET_API');
+  assert.ok(Math.abs(pf.wallets.total - 119.99) < 1e-9);
+  assert.equal(pf.walletSummary().futures, 1003.5);
+  // wallet API refused -> spot account + futures margin balance
+  engine.liveClient.walletBalance = async () => { throw new Error('HTTP 401 -2015 Invalid API-key, IP, or permissions for action.'); };
+  engine.liveClient.spotAccount = async () => ({ balances: [{ asset: 'USDT', free: '115', locked: '0' }, { asset: 'BTC', free: '0.0001', locked: '0' }] });
+  pf.wallets = null;
+  await pf.refreshWallets();
+  assert.equal(pf.wallets.source, 'SPOT+FUTURES');
+  assert.match(pf.wallets.error, /-2015/);
+  assert.ok(Math.abs(pf.wallets.total - (115 + 8.4 + 1003.5)) < 1e-6);
+});
