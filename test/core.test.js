@@ -167,6 +167,30 @@ test('live: unknown order result is never resent and is reconciled by clientOrde
   assert.equal(placed.newClientOrderId, slot.position.clientOrderId);
 });
 
+test('live: FILLED response without avgPrice/cumQuote reads the price back; no price -> not opened', async () => {
+  const { engine } = newEngine('LIVE');
+  let queryOk = false;
+  engine.live = { ...engine.live, status: 'CONNECTED', hedgeMode: true, leverage: { BTCUSDT: 1, ETHUSDT: 1, XRPUSDT: 1 }, account: { equity: 1000, available: 1000 } };
+  engine.liveClient = {
+    hasKeys: () => true,
+    account: async () => ({ totalMarginBalance: '1000', totalWalletBalance: '1000', availableBalance: '1000', totalUnrealizedProfit: '0', positions: [] }),
+    // shape Binance returned on 2026-09-25: FILLED but no avgPrice / cumQuote
+    newOrder: async (p) => ({ orderId: 9, status: 'FILLED', clientOrderId: p.newClientOrderId, price: '0.0000', origQty: p.quantity, executedQty: p.quantity }),
+    queryOrder: async (sym, id) => { if (!queryOk) throw new BinanceError('network error: timeout'); return { status: 'FILLED', avgPrice: '100.5', executedQty: '0.001', orderId: 9, clientOrderId: id }; },
+    userTrades: async () => [{ commission: '0.05', commissionAsset: 'USDT' }],
+    newAlgoOrder: async () => ({ algoId: 1 }),
+  };
+  await engine.openPosition('TURTLE', 'BTCUSDT', 'LONG', { atr: 1 });
+  const slot = engine.slot('TURTLE', 'BTCUSDT');
+  assert.equal(slot.position, null, 'never open a position without a fill price');
+  assert.equal(slot.status, 'UNKNOWN');
+  queryOk = true;
+  await engine.resolveUnknownOrders();
+  assert.equal(slot.position.entryPrice, 100.5);
+  assert.ok(slot.position.stopPrice > 0 && slot.position.stopPrice < 100.5);
+  assert.ok(Number.isFinite(slot.position.entryFee));
+});
+
 test('live: definitive rejection frees the slot', async () => {
   const { engine } = newEngine('LIVE');
   engine.live = { ...engine.live, status: 'CONNECTED', hedgeMode: true, leverage: { BTCUSDT: 1, ETHUSDT: 1, XRPUSDT: 1 } };

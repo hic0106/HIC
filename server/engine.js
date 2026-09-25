@@ -587,7 +587,14 @@ export class Engine {
     if (r.status !== 'FILLED' && !(['CANCELED', 'EXPIRED', 'REJECTED', 'EXPIRED_IN_MATCH'].includes(r.status) && executedQty > 0)) {
       return { pending: true, status: r.status };
     }
-    const avgPrice = Number(r.avgPrice) || (Number(r.cumQuote) / executedQty);
+    const px = (x) => Number(x.avgPrice) || (Number(x.cumQuote) / Number(x.executedQty || executedQty));
+    let avgPrice = px(r);
+    // the new-order response can omit avgPrice / cumQuote: read them back from the order query
+    if (!(avgPrice > 0)) {
+      try { avgPrice = px(await this.liveClient.queryOrder(order.symbol, order.clientOrderId)); } catch { /* checked below */ }
+    }
+    // never open a position without a price (no stop could be set): stays UNKNOWN, resolveUnknownOrders retries
+    if (!(avgPrice > 0)) return { pending: true, status: `${r.status} (no fill price)` };
     let fee = executedQty * avgPrice * (this.cfg.general.takerFeePct / 100);
     try {
       const trades = await this.liveClient.userTrades(order.symbol, r.orderId);
