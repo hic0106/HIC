@@ -60,6 +60,7 @@ Testnet을 체크하면 주문이 `demo-fapi.binance.com`으로 전송됩니다(
 4. PC 터미널을 끄고 `deploy/upload-data.bat`로 설정·포지션·키 복사(한 번). 이후 LIVE는 서버에서만.
 5. 접속: `deploy/connect.bat`(SSH 터널) → http://127.0.0.1:8421. 8420 포트는 인터넷에 열지 않습니다(터미널에 비밀번호 없음).
 6. 업데이트: 서버에서 `bash ~/HIC/deploy/update.sh`. 로그: `journalctl -u hic -f`.
+- 폰 접속(Tailscale): 서버에서 `bash ~/HIC/deploy/setup-tailscale.sh` → 표시된 로그인 링크로 로그인 → 폰에 Tailscale 앱 설치(같은 계정) → 출력된 `https://<서버>.<tailnet>.ts.net` 열기. 내 Tailscale 기기에서만 접속되고 인터넷에는 열리지 않습니다(Tailscale Serve, Funnel 아님).
 - 서버 재시작/업데이트 후 봇은 항상 **정지 상태**로 시작합니다(안전). 접속해서 START를 누르세요. Binance에 등록된 손절주문은 계속 작동합니다.
 
 ## 화면 구성

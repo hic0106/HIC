@@ -67,7 +67,7 @@ Stop은 ATR_DYNAMIC(min/max 클램프), LIVE에서는 Binance Algo STOP_MARKET�
 
 ## 클라우드 운영 (`deploy/`)
 
-- AWS Lightsail 서울/도쿄 Ubuntu + 고정 IP 권장(미국 리전은 Binance 451 차단). `setup-ubuntu.sh`(Node 22, swap, NTP, systemd `hic`), `update.sh`, Windows `connect.bat`(SSH 터널 로컬 8421 → 서버 127.0.0.1:8420), `upload-data.bat`(data 복사). 8420은 외부 공개 금지(인증 없음).
+- AWS Lightsail 서울/도쿄 Ubuntu + 고정 IP 권장(미국 리전은 Binance 451 차단). `setup-ubuntu.sh`(Node 22, swap, NTP, systemd `hic`), `update.sh`, Windows `connect.bat`(SSH 터널 로컬 8421 → 서버 127.0.0.1:8420), `upload-data.bat`(data 복사). 8420은 외부 공개 금지(인증 없음). 폰: `setup-tailscale.sh`(Tailscale Serve → 127.0.0.1:8420, tailnet 전용, Funnel 금지). WS origin 허용 목록 `HIC_ALLOWED_ORIGINS`(systemd drop-in).
 
 ## data/ 폴더 (gitignore, PC 이전 시 복사)
 

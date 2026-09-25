@@ -349,10 +349,20 @@ app.post('/api/live/hedge-mode', async (req, res) => {
 // ---- server + ws push
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server, path: '/ws' });
+// WebSocket origin check (browsers send Origin; a foreign web page must not open the live feed).
+// Same host, or an origin listed in HIC_ALLOWED_ORIGINS (e.g. the Tailscale Serve https://<name>.ts.net address,
+// whose proxy may rewrite the Host header).
+const ALLOWED_ORIGINS = new Set(String(process.env.HIC_ALLOWED_ORIGINS || '').split(',').map((x) => x.trim().replace(/\/$/, '')).filter(Boolean));
+function originAllowed(req) {
+  const origin = req.headers.origin;
+  if (!origin) return true;
+  let u;
+  try { u = new URL(origin); } catch { return false; }
+  return u.host === req.headers.host || u.host === req.headers['x-forwarded-host'] || ALLOWED_ORIGINS.has(u.origin);
+}
 
 wss.on('connection', (ws, req) => {
-  const origin = req.headers.origin;
-  if (origin && new URL(origin).host !== req.headers.host) { ws.close(1008, 'origin'); return; }
+  if (!originAllowed(req)) { ws.close(1008, 'origin'); return; }
   ws.send(JSON.stringify({ type: 'logs', data: log.recent(500) }));
   ws.send(JSON.stringify({ type: 'snapshot', data: fullSnapshot() }));
   ws.send(JSON.stringify({ type: 'signals', data: signalLog.recent({ limit: 500 }) }));
