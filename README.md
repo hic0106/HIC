@@ -50,6 +50,18 @@ $s.TargetPath = "$HOME\HIC\start.bat"; $s.WorkingDirectory = "$HOME\HIC"; $s.Sav
 키는 `data/secrets.json`(권한 600)에만 저장되고 브라우저로 다시 전송되지 않습니다. `data/` 폴더는 git에 포함되지 않습니다.
 Testnet을 체크하면 주문이 `demo-fapi.binance.com`으로 전송됩니다(시장 데이터는 항상 메인넷 공개 데이터 사용).
 
+## 클라우드 서버에서 실행 (고정 IP)
+
+집·모바일 IP가 바뀌면 Binance 키의 IP 제한에 걸립니다(-2015). 고정 IP 서버에서 24시간 실행합니다. `deploy/` 폴더 참고.
+
+1. AWS Lightsail(서울 또는 도쿄) Ubuntu 인스턴스 생성, 고정 IP 연결. **미국 리전 금지**(Binance가 451로 차단). 방화벽은 SSH(22)만.
+2. 서버 SSH 접속 후: `curl -fsSL https://raw.githubusercontent.com/hic0106/HIC/claude/binance-crypto-trading-terminal-xspxvw/deploy/setup-ubuntu.sh | bash` (Node 22, 코드, 스왑, 시간 동기화, systemd 서비스 `hic`).
+3. Binance API 키 IP 제한에 서버 고정 IP 추가.
+4. PC 터미널을 끄고 `deploy/upload-data.bat`로 설정·포지션·키 복사(한 번). 이후 LIVE는 서버에서만.
+5. 접속: `deploy/connect.bat`(SSH 터널) → http://127.0.0.1:8421. 8420 포트는 인터넷에 열지 않습니다(터미널에 비밀번호 없음).
+6. 업데이트: 서버에서 `bash ~/HIC/deploy/update.sh`. 로그: `journalctl -u hic -f`.
+- 서버 재시작/업데이트 후 봇은 항상 **정지 상태**로 시작합니다(안전). 접속해서 START를 누르세요. Binance에 등록된 손절주문은 계속 작동합니다.
+
 ## 화면 구성
 
 - **상단**: Total Equity / Today's PnL / Total Return(가장 크게), Available, Invested, Total PnL, Long·Short·Net Exposure, Market Data·Binance API·Bot 상태, 마지막 데이터 시각, PAPER/LIVE 배지, START / STOP ALL BOTS / CLOSE ALL POSITIONS.

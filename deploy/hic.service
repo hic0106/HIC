@@ -1,0 +1,21 @@
+[Unit]
+Description=HIC Futures Terminal
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=__USER__
+WorkingDirectory=__DIR__
+# localhost only: reach the UI through an SSH tunnel
+Environment=HOST=127.0.0.1
+Environment=PORT=8420
+Environment=NODE_ENV=production
+ExecStart=__NODE__ server/index.js
+Restart=on-failure
+RestartSec=5
+# state is saved on SIGTERM (systemctl stop / restart)
+KillSignal=SIGTERM
+TimeoutStopSec=20
+
+[Install]
+WantedBy=multi-user.target
