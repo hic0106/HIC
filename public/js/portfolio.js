@@ -1,7 +1,8 @@
 // PORTFOLIO screen: real account (Exchange View) + strategy attribution (Strategy View).
 // Data: WS 'portfolio' pushes (on every fill / close / account update, else every 2 s) + /api/portfolio/equity.
-import { $, $$, esc, fUsd, fSigned, fPct, fNum, fPrice, fDur, fZone, cls, api } from './util.js';
+import { $, $$, esc, fUsd, fSigned, fPct, fNum, fPrice, fDur, fZone, cls, api, toast } from './util.js';
 import { ST_COLOR } from './chart.js';
+import { confirmDialog } from './modals.js';
 
 const LC = window.LightweightCharts;
 const SYM_COLOR = { BTCUSDT: '#f7931a', ETHUSDT: '#627eea', XRPUSDT: '#9aa4b1', QQQUSDT: '#26c6da', CASH: '#2b3440' };
@@ -64,6 +65,10 @@ export function mountPortfolio(root, meta) {
   $('#pfPositions', root).addEventListener('click', (e) => {
     const th = e.target.closest('th[data-k]'); if (!th) return;
     P.sort = { k: th.dataset.k, dir: P.sort.k === th.dataset.k ? -P.sort.dir : -1 }; renderPositions();
+  });
+  $('#pfExchange', root).addEventListener('click', (e) => {
+    const b = e.target.closest('[data-sell],[data-move]'); if (!b) return;
+    if (b.dataset.move) moveUsdt(); else { const [wallet, asset] = b.dataset.sell.split(':'); sellAsset(wallet, asset); }
   });
   initChart();
   loadCurve();
@@ -160,15 +165,43 @@ function assetsHtml(e) {
   if (!e.live) return '';
   const other = (e.assets || []).filter((a) => a.asset !== 'USDT');
   const fut = (e.assets || []).length ? `<div class="sub-h">선물 지갑 자산 <span class="muted">USDT 외 자산 포함 · 합계 ${fUsd(e.assetsTotalUsdt)}${other.length ? ' · 위 총 자산은 USDT만 계산 (단일자산 모드)' : ''}</span></div>
-    <table class="t compact"><thead><tr><th>자산</th><th>지갑 잔고</th><th>마진 잔고</th><th>평가손익</th><th>가격 (USDT)</th><th>USDT 환산</th></tr></thead><tbody>
-    ${e.assets.map((a) => `<tr><td class="l"><b>${esc(a.asset)}</b></td><td>${fNum(a.wallet, 6)}</td><td>${fNum(a.margin, 6)}</td><td class="${cls(a.unrealized)}">${fSigned(a.unrealized, 4)}</td><td>${a.price != null ? fNum(a.price, 4) : '—'}</td><td>${a.valueUsdt != null ? fUsd(a.valueUsdt) : '<span class="muted">가격 없음</span>'}</td></tr>`).join('')}</tbody></table>` : '';
+    <table class="t compact"><thead><tr><th>자산</th><th>지갑 잔고</th><th>마진 잔고</th><th>평가손익</th><th>가격 (USDT)</th><th>USDT 환산</th><th></th></tr></thead><tbody>
+    ${e.assets.map((a) => `<tr><td class="l"><b>${esc(a.asset)}</b></td><td>${fNum(a.wallet, 6)}</td><td>${fNum(a.margin, 6)}</td><td class="${cls(a.unrealized)}">${fSigned(a.unrealized, 4)}</td><td>${a.price != null ? fNum(a.price, 4) : '—'}</td><td>${a.valueUsdt != null ? fUsd(a.valueUsdt) : '<span class="muted">가격 없음</span>'}</td><td>${a.asset !== 'USDT' ? `<button class="btn small ghost" data-sell="FUTURES:${esc(a.asset)}">판매</button>` : ''}</td></tr>`).join('')}</tbody></table>` : '';
   const w = e.wallets;
   const all = !w ? '<div class="empty">Binance 전체 지갑 조회 중…</div>'
     : w.error && !w.list.length ? `<div class="empty down">전체 지갑 조회 실패: ${esc(w.error)}</div>`
     : `<div class="sub-h">Binance 전체 자산 <span class="muted">모든 지갑 · USDT 환산 · 합계 <b>${fUsd(w.total)}</b>${w.at ? ' · ' + fZone(w.at) : ''}${w.error ? ` · <span class="warn">마지막 조회 실패: ${esc(w.error)}</span>` : ''}</span></div>
     <table class="t compact"><thead><tr><th>지갑</th><th>잔고 (USDT)</th><th class="l">자산</th></tr></thead><tbody>
-    ${w.list.filter((x) => x.balance > 0 || x.assets.length).map((x) => `<tr><td class="l">${esc(WALLET_KO[x.name] || x.name)}</td><td>${fUsd(x.balance)}</td><td class="l muted">${x.assets.slice(0, 12).map((b) => `${esc(b.asset)} ${fNum(b.free + b.locked + b.freeze, 6)}`).join(' · ')}</td></tr>`).join('') || '<tr><td colspan="3" class="muted">잔고 없음</td></tr>'}</tbody></table>`;
+    ${w.list.filter((x) => x.balance > 0 || x.assets.length).map((x) => `<tr><td class="l">${esc(WALLET_KO[x.name] || x.name)}</td><td>${fUsd(x.balance)}</td><td class="l muted">${x.assets.slice(0, 12).map((b) => `${esc(b.asset)} ${fNum(b.free + b.locked + b.freeze, 6)}${x.name === 'Spot' && b.free > 0 ? (b.asset === 'USDT' ? ` <button class="btn small ghost" data-move="1">선물로 이동</button>` : ` <button class="btn small ghost" data-sell="SPOT:${esc(b.asset)}">판매</button>`) : ''}`).join(' · ')}</td></tr>`).join('') || '<tr><td colspan="3" class="muted">잔고 없음</td></tr>'}</tbody></table>`;
   return fut + all;
+}
+
+// ---- asset sale (spot market sell for USDT; typed confirmation)
+async function sellAsset(wallet, asset) {
+  const pv = await api('POST', '/api/wallet/preview', { wallet, asset, amount: 'ALL' });
+  if (!pv.ok) return toast(`판매 불가: ${pv.msg}`, 'err');
+  const p = pv.plan;
+  const input = await confirmDialog({
+    title: `${asset} 판매 (시장가 → USDT)`, danger: true, word: 'SELL', okText: '판매',
+    html: `<p>${wallet === 'FUTURES' ? '선물 지갑 → 현물 지갑으로 옮긴 뒤 ' : '현물 지갑에서 '}<b>${esc(p.symbol)}</b> 현물 시장가로 판매합니다. 체결가는 현재가와 다를 수 있습니다.</p>
+      <table class="t compact kv"><tbody><tr><td>판매 가능</td><td>${fNum(p.available, 8)} ${esc(asset)}</td></tr><tr><td>현재가</td><td>${fNum(p.price, 6)} USDT</td></tr><tr><td>예상 수령 (전량)</td><td>≈ ${fUsd(p.estUsdt)} USDT (수수료 전)</td></tr></tbody></table>
+      <p><label>판매 수량 <input type="number" id="sellAmt" step="any" min="0" value="${p.qty}"> ${esc(asset)}</label></p>
+      <p><label><input type="checkbox" id="sellToFut" checked> 받은 USDT를 선물 지갑으로 이동</label></p>
+      <p class="muted">API 키 권한 필요: 현물 거래${wallet === 'FUTURES' ? ' + 유니버설 전송' : ''} (출금 권한은 필요 없음). 수량 단위보다 작은 잔량은 현물 지갑에 남습니다.</p>`,
+    read: () => ({ amount: $('#sellAmt').value, toFutures: $('#sellToFut').checked }),
+  });
+  if (!input) return;
+  toast(`${asset} 판매 요청 중…`);
+  const r = await api('POST', '/api/wallet/sell', { wallet, asset, amount: input.amount, toFutures: input.toFutures, confirm: 'SELL' });
+  const detail = (r.steps || []).map((x) => `${x.ok === false ? '✖' : '✔'} ${x.msg}`).join('\n');
+  toast(`${r.ok ? '완료' : '실패'}: ${r.msg}${detail ? '\n' + detail : ''}`, r.ok ? 'ok' : 'err');
+}
+
+async function moveUsdt() {
+  const ok = await confirmDialog({ title: '현물 USDT → 선물 지갑', word: 'MOVE', okText: '이동', html: '<p>현물 지갑의 사용 가능한 USDT 전부를 USDⓈ-M 선물 지갑으로 옮깁니다. (유니버설 전송 권한 필요)</p>' });
+  if (!ok) return;
+  const r = await api('POST', '/api/wallet/usdt-to-futures', { amount: 'ALL', confirm: 'MOVE' });
+  toast(r.msg, r.ok ? 'ok' : 'err');
 }
 
 function renderRecon() {

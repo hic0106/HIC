@@ -20,6 +20,7 @@ import { BacktestRunner } from './backtest/backtestRunner.js';
 import { validateStrategySettings, num } from './strategyConfig.js';
 import { AiService } from './ai/aiService.js';
 import { UniverseManager, universeConfig } from './universe.js';
+import { AssetSeller } from './portfolio/assetSeller.js';
 import { BinanceClient, endpoints } from './binance.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -44,6 +45,8 @@ const scheduler = new StrategyScheduler({ store, md, engine, log, signalLog });
 const portfolio = new PortfolioService({ store, engine, md, log });
 const risk = new RiskMonitor({ engine, md, log, portfolio });
 const backtest = new BacktestRunner({ store, md, log, rest: md.rest, universe }); // public market data only, never places orders
+// Asset sale (portfolio screen, user-initiated, typed confirmation): spot market sell for USDT, never withdraws
+const seller = new AssetSeller({ getClient: () => engine.liveClient, log, onDone: () => { portfolio.refreshExchange('asset sale').catch(() => {}); portfolio.wallets = null; portfolio.refreshWallets().catch(() => {}); } });
 const ai = new AiService({ store, backtest, controller, engine, log }); // Claude API: analysis / improvement proposals / strategy generation (never trades)
 const fullSnapshot = () => {
   const s = engine.snapshot();
@@ -83,6 +86,21 @@ app.get('/api/config', (req, res) => res.json({ config: store.config, meta: {
   timeframeChoices: CRYPTO_TIMEFRAME_CHOICES, timeframeLabel: TF_LABEL,
   universe: universe.snapshot(),
 } }));
+const sellArgs = (b) => ({ wallet: String(b.wallet || ''), asset: String(b.asset || ''), amount: b.amount === 'ALL' || b.amount == null || b.amount === '' ? 'ALL' : num(b.amount, { min: 0 }), toFutures: b.toFutures !== false, futuresAssets: portfolio.exchange?.assets || [] });
+app.post('/api/wallet/preview', async (req, res) => {
+  if (!engine.liveClient?.hasKeys()) return ok(res, { ok: false, msg: 'API 키 없음' });
+  try { const p = await seller.plan(sellArgs(req.body || {})); ok(res, { ok: true, plan: { ...p, filters: undefined } }); } catch (e) { ok(res, { ok: false, msg: e.message }); }
+});
+app.post('/api/wallet/sell', async (req, res) => {
+  if (!engine.liveClient?.hasKeys()) return ok(res, { ok: false, msg: 'API 키 없음' });
+  if (!confirmed(req, 'SELL')) return ok(res, { ok: false, msg: 'Type SELL to confirm', needConfirm: true });
+  try { ok(res, await seller.sell(sellArgs(req.body || {}))); } catch (e) { ok(res, { ok: false, msg: e.message }); }
+});
+app.post('/api/wallet/usdt-to-futures', async (req, res) => {
+  if (!engine.liveClient?.hasKeys()) return ok(res, { ok: false, msg: 'API 키 없음' });
+  if (!confirmed(req, 'MOVE')) return ok(res, { ok: false, msg: 'Type MOVE to confirm', needConfirm: true });
+  ok(res, await seller.moveUsdtToFutures(req.body?.amount ?? 'ALL'));
+});
 app.get('/api/universe', (req, res) => res.json(universe.snapshot()));
 app.post('/api/universe/refresh', async (req, res) => ok(res, await universe.refresh()));
 // Universe settings: trade permissions follow on the next re-rank, the watch list (market data streams) on restart.

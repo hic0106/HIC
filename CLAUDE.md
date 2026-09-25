@@ -8,7 +8,7 @@
 - 저장소: `hic0106/HIC`, 작업 브랜치: `claude/binance-crypto-trading-terminal-xspxvw` (여기에만 commit/push, PR은 요청 시에만).
 - 스택: Node 22 ESM, Express 5, ws, lightweight-charts v5, @anthropic-ai/sdk 0.128.0. 빌드 단계 없음.
 - 실행: `start.bat`(Windows, npm install 후 서버 실행) 또는 `npm start` → http://localhost:8420 (`PORT` 환경변수로 변경 가능)
-- 테스트: `npm test` (현재 115개 전부 통과). 가짜 서버: `npm run mock`, `npm run dev:mock`(data-mock/ 사용), `npm run mock:claude` + `ANTHROPIC_BASE_URL=http://127.0.0.1:9902`.
+- 테스트: `npm test` (현재 121개 전부 통과). 가짜 서버: `npm run mock`, `npm run dev:mock`(data-mock/ 사용), `npm run mock:claude` + `ANTHROPIC_BASE_URL=http://127.0.0.1:9902`.
 - 자세한 사용법/구조: `README.md`.
 
 ## 사용자 선호
@@ -20,7 +20,8 @@
 ## 안전 규칙 (반드시 유지)
 
 - API 키는 `data/secrets.json`(gitignore, 0600)에만 저장. UI로 반환하거나 커밋 금지. Claude API 키도 동일(`anthropicApiKey`). `ANTHROPIC_API_KEY` 환경변수도 지원하지만 Claude Code 로그인과 충돌하므로 설정 권장하지 않음.
-- Binance 키 권한: Enable Reading + Enable Futures만, IP 제한, 출금 금지.
+- Binance 키 권한: Enable Reading + Enable Futures, IP 제한, 출금 금지. 코인 판매(내 자산 화면) 사용 시에만 Enable Spot & Margin Trading + Permits Universal Transfer 추가(사용자 결정 2026-09-25). 출금 API는 절대 쓰지 않음.
+- 코인 판매(`server/portfolio/assetSeller.js`): 사용자가 버튼 + `SELL` 입력 시에만. 선물 지갑 자산 → 현물 이동(UMFUTURE_MAIN) → 현물 시장가 매도 → USDT 선물로(MAIN_UMFUTURE). 결과 불명 주문은 재전송 없이 clientOrderId 조회. 봇/AI는 호출하지 않음.
 - 레버리지 자동 증가 금지. 레버리지는 전략별(`strategies.<name>.leverage`), 주문금액 = 증거금, 명목 = 금액 × 레버리지, Binance 종목 레버리지 = 켜진 전략 중 최대(`engine.symbolLeverage`). 백테스트는 1x. Controller/AI는 주문 금액(amounts)·enabled 플래그를 바꾸지 않고 주문도 넣지 않는다.
 - AI 변경은 사용자가 [적용]을 눌러야만 반영. LIVE 실행 중이면 `APPLY` 입력 확인 필요.
 - LIVE 동작(시작, 전체 청산 등)은 입력 확인 필요.
@@ -41,6 +42,7 @@ Stop은 ATR_DYNAMIC(min/max 클램프), LIVE에서는 Binance Algo STOP_MARKET�
 
 ## 구성 요소 요약
 
+- `server/portfolio/portfolioService.js`: 선물 지갑 전 자산(USDT 환산, `/fapi/v2/ticker/price`) + Binance 전체 지갑(`/sapi/v1/asset/wallet/balance`, 읽기 권한) 표시.
 - `server/universe.js`: 코인 Universe. 시작 시 거래대금(quoteVolume) 상위 20 감시 / 15 신규진입 + 보호 종목(포지션·주문·거래소 Stop) → `assets.registerCryptoSymbols()`로 `SYMBOLS`/`SYMBOL_META`(live 객체) 교체. 24h 재순위는 진입 허용만 갱신, 감시 목록 변경은 재시작 시. 엔진 `preTradeChecks`에서 `UNIVERSE_FILTER`.
 - `server/backtest/historicalUniverse.js`: 백테스트용 과거 거래대금 순위(감시 후보 안, 7일 리밸런싱, 직전 30일, 미래 데이터 미사용).
 

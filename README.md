@@ -184,6 +184,14 @@ Emergency Stop / Take Profit은 스케줄러와 분리되어 **모든 가격 틱
 - 체결·청산·비상청산 시 즉시 갱신(Signal → Order → Fill → Position → Portfolio).
 - PAPER 모드는 가상 계좌가 Exchange View 역할을 합니다.
 
+## 내 자산: 전체 자산 · 코인 판매
+
+- 선물 지갑의 모든 자산(USDT 외 BNB·USDC 등)을 USDT로 환산해 표시합니다. 단일자산 모드에서는 Binance의 총 자산 값에 USDT만 들어가기 때문입니다.
+- Binance 전체 자산: 현물·펀딩·선물·Earn 등 모든 지갑의 합계(`/sapi/v1/asset/wallet/balance`, 읽기 권한).
+- 코인 판매: 선물/현물 지갑 자산 옆 [판매] → 수량 확인 → `SELL` 입력. 선물 지갑 자산은 현물로 옮겨 `<코인>USDT` 현물 시장가로 판매하고, 받은 USDT를 선물 지갑으로 되돌립니다(선택). 현물 USDT는 [선물로 이동]으로 옮길 수 있습니다.
+  - 필요한 키 권한: Enable Spot & Margin Trading, Permits Universal Transfer. 출금 권한은 쓰지 않습니다.
+  - 결과를 알 수 없는 판매 주문은 다시 보내지 않고 주문 ID로 조회합니다. 단계가 중간에 실패하면 자산이 어느 지갑에 있는지 표시합니다.
+
 ## 코인 종목 선정 (동적 Universe)
 
 `server/universe.js`. 프로그램 시작 시 Binance 공개 API(`/fapi/v1/exchangeInfo`, `/fapi/v1/ticker/24hr`)로 감시 코인을 정합니다.

@@ -114,7 +114,7 @@ const server = http.createServer((req, res) => {
   const u = new URL(req.url, `http://${req.headers.host}`);
   const q = Object.fromEntries(u.searchParams);
   const p = u.pathname;
-  const priv = !['/fapi/v1/time', '/fapi/v1/exchangeInfo', '/fapi/v1/klines', '/fapi/v1/fundingRate', '/fapi/v1/ticker/24hr', '/fapi/v2/ticker/price'].includes(p) && !p.startsWith('/mock/');
+  const priv = !['/fapi/v1/time', '/fapi/v1/exchangeInfo', '/fapi/v1/klines', '/fapi/v1/fundingRate', '/fapi/v1/ticker/24hr', '/fapi/v2/ticker/price', '/api/v3/exchangeInfo', '/api/v3/ticker/price'].includes(p) && !p.startsWith('/mock/');
   if (priv && !req.headers['x-mbx-apikey']) return json(res, 401, { code: -2015, msg: 'Invalid API-key' });
   if (p === '/fapi/v1/time') return json(res, 200, { serverTime: Date.now() });
   if (p === '/fapi/v1/exchangeInfo') {
@@ -124,6 +124,39 @@ const server = http.createServer((req, res) => {
       filters: [{ filterType: 'PRICE_FILTER', tickSize: c.tick }, { filterType: 'LOT_SIZE', stepSize: c.step, minQty: c.minQty, maxQty: '1000000' }, { filterType: 'MARKET_LOT_SIZE', stepSize: c.step, minQty: c.minQty, maxQty: '100000' }, { filterType: 'MIN_NOTIONAL', notional: c.minNotional }] })) });
   }
   if (p === '/fapi/v2/ticker/price') return json(res, 200, Object.keys(SYMS).map((s) => ({ symbol: s, price: String(hist[s].price) })));
+  // ---- spot (asset sale): exchangeInfo / price / account / market order / universal transfer
+  if (p === '/api/v3/exchangeInfo') {
+    const base = String(q.symbol || '').replace(/USDT$/, '');
+    if (!(base in acct.otherAssets || base in acct.spot || hist[q.symbol])) return json(res, 400, { code: -1121, msg: 'Invalid symbol.' });
+    return json(res, 200, { symbols: [{ symbol: q.symbol, status: 'TRADING', baseAsset: base, quoteAsset: 'USDT', filters: [{ filterType: 'LOT_SIZE', minQty: '0.001', maxQty: '100000', stepSize: '0.001' }, { filterType: 'MARKET_LOT_SIZE', minQty: '0', maxQty: '100000', stepSize: '0' }, { filterType: 'NOTIONAL', minNotional: '5', applyMinToMarket: true }] }] });
+  }
+  if (p === '/api/v3/ticker/price') return json(res, 200, { symbol: q.symbol, price: String(spotPx(q.symbol.replace(/USDT$/, ''))) });
+  if (p === '/api/v3/account') return json(res, 200, { balances: Object.entries(acct.spot).map(([a, v]) => ({ asset: a, free: String(v), locked: '0' })) });
+  if (p === '/api/v3/order' && req.method === 'POST') {
+    const base = q.symbol.replace(/USDT$/, ''), qty = Number(q.quantity);
+    if (q.side !== 'SELL' || q.type !== 'MARKET') return json(res, 400, { code: -1102, msg: 'mock: SELL MARKET only' });
+    if (!((acct.spot[base] || 0) >= qty - 1e-12)) return json(res, 400, { code: -2010, msg: 'Account has insufficient balance for requested action.' });
+    const px = spotPx(base), quote = qty * px, fee = quote * 0.001;
+    acct.spot[base] -= qty; acct.spot.USDT = (acct.spot.USDT || 0) + quote - fee;
+    const o = { symbol: q.symbol, orderId: ++oid, clientOrderId: q.newClientOrderId, status: 'FILLED', executedQty: String(qty), cummulativeQuoteQty: String(quote), fills: [{ price: String(px), qty: String(qty), commission: String(fee), commissionAsset: 'USDT' }] };
+    spotOrders[q.newClientOrderId] = o;
+    return json(res, 200, o);
+  }
+  if (p === '/api/v3/order') return spotOrders[q.origClientOrderId] ? json(res, 200, spotOrders[q.origClientOrderId]) : json(res, 400, { code: -2013, msg: 'Order does not exist.' });
+  if (p === '/sapi/v1/asset/transfer' && req.method === 'POST') {
+    const amt = Number(q.amount), a = q.asset;
+    if (q.type === 'UMFUTURE_MAIN') {
+      const have = a === 'USDT' ? acct.wallet : acct.otherAssets[a] || 0;
+      if (have < amt - 1e-12) return json(res, 400, { code: -5002, msg: 'Insufficient balance' });
+      if (a === 'USDT') acct.wallet -= amt; else acct.otherAssets[a] -= amt;
+      acct.spot[a] = (acct.spot[a] || 0) + amt;
+    } else if (q.type === 'MAIN_UMFUTURE') {
+      if ((acct.spot[a] || 0) < amt - 1e-12) return json(res, 400, { code: -5002, msg: 'Insufficient balance' });
+      acct.spot[a] -= amt;
+      if (a === 'USDT') acct.wallet += amt; else acct.otherAssets[a] = (acct.otherAssets[a] || 0) + amt;
+    } else return json(res, 400, { code: -1102, msg: 'mock: bad transfer type' });
+    return json(res, 200, { tranId: ++oid });
+  }
   if (p === '/sapi/v1/asset/wallet/balance') {
     const px = (a) => (a === 'USDT' ? 1 : hist[`${a}USDT`]?.price ?? 0);
     const futUsdt = acct.wallet + Object.entries(acct.otherAssets).reduce((t, [a, v]) => t + v * px(a), 0);
@@ -154,8 +187,8 @@ const server = http.createServer((req, res) => {
     const u2 = unreal();
     return json(res, 200, { totalWalletBalance: String(acct.wallet), totalUnrealizedProfit: String(u2), totalMarginBalance: String(acct.wallet + u2), availableBalance: String(acct.wallet + u2 - margin()),
       // single-asset mode: totals are USDT only; other assets are listed here
-      assets: [{ asset: 'USDT', walletBalance: String(acct.wallet), unrealizedProfit: String(u2), marginBalance: String(acct.wallet + u2) },
-        ...Object.entries(acct.otherAssets).map(([a, v]) => ({ asset: a, walletBalance: String(v), unrealizedProfit: '0', marginBalance: String(v) }))],
+      assets: [{ asset: 'USDT', walletBalance: String(acct.wallet), unrealizedProfit: String(u2), marginBalance: String(acct.wallet + u2), maxWithdrawAmount: String(Math.max(0, acct.wallet + u2 - margin())) },
+        ...Object.entries(acct.otherAssets).map(([a, v]) => ({ asset: a, walletBalance: String(v), unrealizedProfit: '0', marginBalance: String(v), maxWithdrawAmount: String(v) }))],
       positions: Object.values(acct.positions).map((x) => ({ symbol: x.symbol, positionSide: x.side, positionAmt: String(x.side === 'LONG' ? x.qty : -x.qty) })) });
   }
   if (p === '/fapi/v3/positionRisk') {
@@ -220,6 +253,8 @@ const server = http.createServer((req, res) => {
 });
 
 let oid = 1000;
+const spotOrders = {};
+const spotPx = (a) => (a === 'USDT' ? 1 : a === 'USDC' ? 0.9999 : hist[`${a}USDT`]?.price ?? 1);
 const algos = {};
 const incomes = [];
 let listenKey = null;

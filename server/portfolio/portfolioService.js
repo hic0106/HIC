@@ -117,7 +117,7 @@ export class PortfolioService extends EventEmitter {
       marginBalance: Number(acct.totalMarginBalance), unrealized: Number(acct.totalUnrealizedProfit),
       positionInitialMargin: Number(acct.totalPositionInitialMargin ?? acct.totalInitialMargin) || null,
       // every asset in the futures wallet (single-asset mode: the totals above count USDT only)
-      assets: (acct.assets || []).map((a) => ({ asset: a.asset, wallet: Number(a.walletBalance), margin: Number(a.marginBalance ?? a.walletBalance), unrealized: Number(a.unrealizedProfit) || 0 }))
+      assets: (acct.assets || []).map((a) => ({ asset: a.asset, wallet: Number(a.walletBalance), margin: Number(a.marginBalance ?? a.walletBalance), unrealized: Number(a.unrealizedProfit) || 0, maxWithdraw: a.maxWithdrawAmount != null ? Number(a.maxWithdrawAmount) : null }))
         .filter((a) => Math.abs(a.wallet) > 1e-9 || Math.abs(a.margin) > 1e-9),
       positions,
     };

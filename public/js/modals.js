@@ -6,13 +6,14 @@ const box = () => $('#modalBox');
 function close() { modal().classList.add('hidden'); box().innerHTML = ''; box().className = 'modal-box'; }
 
 // Returns true when confirmed. If `word` is set, user must type it exactly.
-export function confirmDialog({ title, html, word = null, okText = '확인', danger = false }) {
+// read(): called before the dialog is removed (collect inputs from `html`); its result is resolved instead of true.
+export function confirmDialog({ title, html, word = null, okText = '확인', danger = false, read = null }) {
   return new Promise((resolve) => {
     box().innerHTML = `<div class="m-h ${danger ? 'danger' : ''}">${esc(title)}<span>⚠</span></div>
       <div class="m-b">${html}${word ? `<p>계속하려면 <b>${esc(word)}</b> 를 입력하세요.</p><input type="text" id="cfWord" autocomplete="off" spellcheck="false">` : ''}</div>
       <div class="m-f"><button class="btn ghost" id="cfNo">취소</button><button class="btn ${danger ? 'stop' : 'primary'}" id="cfYes" ${word ? 'disabled' : ''}>${esc(okText)}</button></div>`;
     modal().classList.remove('hidden');
-    const done = (v) => { close(); document.removeEventListener('keydown', onKey); resolve(v); };
+    const done = (v) => { const out = v && read ? read() : v; close(); document.removeEventListener('keydown', onKey); resolve(out); };
     const onKey = (e) => { if (e.key === 'Escape') done(false); };
     document.addEventListener('keydown', onKey);
     $('#cfNo').onclick = () => done(false);
@@ -39,7 +40,8 @@ export async function openApiModal() {
       </div>
       <div class="m-info">
         · 키는 이 PC의 <b>data/secrets.json</b>에만 저장되며(권한 600) 화면으로 다시 전송되지 않습니다.<br>
-        · Binance API 관리에서 <b>Enable Reading</b>과 <b>Enable Futures</b>만 체크, <b>출금(Withdrawals) 비활성</b>, <b>IP 제한</b>을 권장합니다.<br>
+        · Binance API 관리에서 <b>Enable Reading</b>과 <b>Enable Futures</b> 체크, <b>출금(Withdrawals) 비활성</b>, <b>IP 제한</b>을 권장합니다.<br>
+        · 내 자산 화면의 코인 판매를 쓰려면 <b>Enable Spot &amp; Margin Trading</b>(판매)과 <b>Permits Universal Transfer</b>(선물↔현물 이동)도 필요합니다. 출금 권한은 필요 없습니다.<br>
         · 롱/숏 동시 운용을 위해 계정 포지션 모드는 <b>Hedge Mode(양방향)</b>여야 합니다.
       </div>
       <div id="apiResult" class="m-info" style="display:none"></div>

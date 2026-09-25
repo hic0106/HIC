@@ -115,6 +115,21 @@ export class BinanceClient {
   klines(symbol, interval, limit = 500) { return this.publicGet('/fapi/v1/klines', { symbol, interval, limit }); }
   tickerPrices() { return this.publicGet('/fapi/v2/ticker/price'); } // all USDⓈ-M symbols: [{ symbol, price }]
 
+  // ---- spot (asset sale from the portfolio screen). Needs key permissions "Enable Spot & Margin Trading"
+  // (+ "Permits Universal Transfer" for futures <-> spot). Withdrawals are never used.
+  spotPublic(path, params = {}) {
+    if (!this.spotBase) return Promise.reject(new BinanceError('spot API not available (testnet)', { definitive: true, code: 'NO_SPOT' }));
+    const qs = new URLSearchParams(params).toString();
+    return this._fetch('GET', `${this.spotBase}${path}${qs ? '?' + qs : ''}`);
+  }
+  spotExchangeInfo(symbol) { return this.spotPublic('/api/v3/exchangeInfo', { symbol }); }
+  spotPrice(symbol) { return this.spotPublic('/api/v3/ticker/price', { symbol }); }
+  spotAccount() { return this.signed('GET', '/api/v3/account', { omitZeroBalances: 'true' }, this.spotBase); }
+  spotOrder(params) { return this.signed('POST', '/api/v3/order', params, this.spotBase); }
+  spotQueryOrder(symbol, origClientOrderId) { return this.signed('GET', '/api/v3/order', { symbol, origClientOrderId }, this.spotBase); }
+  // type: UMFUTURE_MAIN (USDⓈ-M futures -> spot) | MAIN_UMFUTURE (spot -> USDⓈ-M futures)
+  transfer(type, asset, amount) { return this.signed('POST', '/sapi/v1/asset/transfer', { type, asset, amount }, this.spotBase); }
+
   // ---- wallet (read-only): balance of every Binance wallet (Spot, Funding, USDⓈ-M Futures, Earn ...) in USDT
   walletBalance() {
     if (!this.spotBase) return Promise.reject(new BinanceError('wallet API not available (testnet)', { definitive: true, code: 'NO_SPOT' }));

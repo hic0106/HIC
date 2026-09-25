@@ -329,3 +329,5 @@ body.view-portfolio #grid, body.view-portfolio #bottom { display: none; }
 .ai-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 0 12px; }
 .ai-grid .ai-strat { padding-left: 0; }
 .ai-grid .btn { margin: 6px 10px 0; }
+
+.toast { white-space: pre-line; }
