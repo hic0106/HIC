@@ -331,3 +331,6 @@ body.view-portfolio #grid, body.view-portfolio #bottom { display: none; }
 .ai-grid .btn { margin: 6px 10px 0; }
 
 .toast { white-space: pre-line; }
+
+#ivMore { background: transparent; color: var(--dim); border: 1px solid var(--line2); border-radius: 2px; font: 600 11px var(--mono); padding: 1px 4px; margin-left: 4px; }
+#ivMore.on { color: var(--warn); border-color: var(--warn); }

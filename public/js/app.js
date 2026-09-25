@@ -170,16 +170,22 @@ function openStrategies() {
 
 function buildIntervalSeg() {
   const cur = localGet('iv', '1d');
-  $('#intervalSeg').innerHTML = [...S.meta.intervals, S.meta.sessionInterval].map((i) => `<button data-iv="${i}" class="${i === cur ? 'on' : ''}" ${i === S.meta.sessionInterval ? 'title="미국 정규장 일봉 (QQQ 신호 기준)"' : ''}>${i === S.meta.sessionInterval ? '미국장 1일' : ({ '5m': '5분', '15m': '15분', '1h': '1시간', '4h': '4시간', '1d': '1일' }[i] || i)}</button>`).join('');
+  // main intervals as buttons, every other Binance interval in the "기타" dropdown
+  const main = S.meta.intervals;
+  const more = (S.meta.chartIntervals || []).filter((i) => !main.includes(i));
+  $('#intervalSeg').innerHTML = [...main, S.meta.sessionInterval].map((i) => `<button data-iv="${i}" class="${i === cur ? 'on' : ''}" ${i === S.meta.sessionInterval ? 'title="미국 정규장 일봉 (QQQ 신호 기준)"' : ''}>${i === S.meta.sessionInterval ? '미국장 1일' : TF[i] || i}</button>`).join('')
+    + (more.length ? `<select id="ivMore" class="${more.includes(cur) ? 'on' : ''}" title="다른 캔들 시간"><option value="">기타</option>${more.map((i) => `<option value="${i}" ${i === cur ? 'selected' : ''}>${TF[i] || i}</option>`).join('')}</select>` : '');
   chart.interval = cur;
-  $('#intervalSeg').addEventListener('click', (e) => {
-    const b = e.target.closest('button[data-iv]');
-    if (!b) return;
-    $$('#intervalSeg button').forEach((x) => x.classList.toggle('on', x === b));
-    chart.interval = b.dataset.iv;
-    localSet('iv', b.dataset.iv);
+  const pick = (iv) => {
+    $$('#intervalSeg button').forEach((x) => x.classList.toggle('on', x.dataset.iv === iv));
+    const sel = $('#ivMore');
+    if (sel) { sel.value = more.includes(iv) ? iv : ''; sel.classList.toggle('on', more.includes(iv)); }
+    chart.interval = iv;
+    localSet('iv', iv);
     chart.load(S.sel).then(() => S.snap && chart.updateOverlays(S.snap, S.sel));
-  });
+  };
+  $('#intervalSeg').addEventListener('click', (e) => { const b = e.target.closest('button[data-iv]'); if (b) pick(b.dataset.iv); });
+  $('#ivMore')?.addEventListener('change', (e) => { if (e.target.value) pick(e.target.value); });
 }
 
 function selectSymbol(sym) {
@@ -192,6 +198,7 @@ function selectSymbol(sym) {
   if (!isSession && chart.interval === S.meta.sessionInterval) {
     chart.interval = '1d';
     $$('#intervalSeg button').forEach((x) => x.classList.toggle('on', x.dataset.iv === '1d'));
+    if ($('#ivMore')) { $('#ivMore').value = ''; $('#ivMore').classList.remove('on'); }
   }
   chart.load(sym).then(() => S.snap && chart.updateOverlays(S.snap, sym));
   if (S.snap) render();

@@ -7,7 +7,9 @@ import { BinanceUsSessionProvider } from './dataProviders.js';
 import { DEFAULT_US_CALENDAR, marketStatus } from './session.js';
 import { US_SESSION } from './scheduler/timeframes.js';
 
-export const CHART_INTERVALS = ['5m', '15m', '1h', '4h', '1d'];
+export const CHART_INTERVALS = ['5m', '15m', '1h', '4h', '1d']; // streamed by WebSocket for every watched symbol
+// Chart can show every Binance interval; the non-streamed ones are kept live from price ticks + REST refresh
+export const CHART_CHOICES = ['1m', '3m', '5m', '15m', '30m', '1h', '2h', '4h', '6h', '8h', '12h', '1d', '3d', '1w', '1M'];
 export const SESSION_INTERVAL = 'US1D'; // chart of US regular-session candles (QQQ signal data)
 const DAILY = '1d';
 const DAILY_HISTORY = 500;
@@ -56,6 +58,7 @@ export class MarketData extends EventEmitter {
     this.lastUpdate = 0;
     this.sockets = {};
     this.chartCache = new Map();
+    this.on('price', ({ symbol, price }) => this.onChartPrice(symbol, price)); // live non-streamed chart intervals
   }
 
   async start() {
@@ -368,11 +371,40 @@ export class MarketData extends EventEmitter {
     }
     const key = `${sym}:${interval}`;
     const cached = this.chartCache.get(key);
+    if (cached) cached.usedAt = Date.now();
     if (cached && Date.now() - cached.fetched < 5 * 60_000 && cached.candles.length >= Math.min(limit, 900)) return cached.candles;
     const rows = await this.rest.klines(sym, interval, limit);
     const candles = rows.map(toCandle);
-    this.chartCache.set(key, { fetched: Date.now(), candles });
+    this.chartCache.set(key, { fetched: Date.now(), usedAt: Date.now(), candles, sym, interval });
     return candles;
+  }
+
+  // Non-streamed chart intervals (1m, 3m, 30m, 2h ... 1M): the open candle follows the price ticks; after it
+  // should have closed, the last candles are refreshed from REST (exchange boundaries, incl. weeks / months).
+  // Only caches the chart used in the last 15 min. Emits 'kline' like the stream so the UI updates the same way.
+  onChartPrice(sym, price, now = Date.now()) {
+    for (const e of this.chartCache.values()) {
+      if (e.sym !== sym || CHART_INTERVALS.includes(e.interval) || now - (e.usedAt || 0) > 15 * 60_000) continue;
+      const last = e.candles[e.candles.length - 1];
+      if (!last) continue;
+      if (now > last.T) { this.refreshChartTail(e); continue; }
+      last.c = price; if (price > last.h) last.h = price; if (price < last.l) last.l = price;
+      if (now - (e.emitAt || 0) >= 500) { e.emitAt = now; this.emit('kline', { symbol: sym, interval: e.interval, candle: { ...last }, closed: false, synthetic: true }); }
+    }
+  }
+
+  async refreshChartTail(e) {
+    if (e.refreshing || Date.now() - (e.tailAt || 0) < 5000) return;
+    e.refreshing = true; e.tailAt = Date.now();
+    try {
+      const rows = (await this.rest.klines(e.sym, e.interval, 3)).map(toCandle);
+      for (const c of rows) {
+        const arr = e.candles, last = arr[arr.length - 1];
+        if (last && c.t === last.t) arr[arr.length - 1] = c;
+        else if (!last || c.t > last.t) { arr.push(c); if (arr.length > 1500) arr.shift(); }
+        this.emit('kline', { symbol: e.sym, interval: e.interval, candle: c, closed: c.T < Date.now(), synthetic: true });
+      }
+    } catch { /* retry on a later tick */ } finally { e.refreshing = false; }
   }
 
   updateChartCache(sym, interval, c) {

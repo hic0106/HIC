@@ -2,7 +2,7 @@
 import { api, fPct, fNum, stepDecimals } from './util.js';
 
 const LC = window.LightweightCharts;
-const IV_MS = { '5m': 300e3, '15m': 900e3, '1h': 3600e3, '4h': 14400e3, '1d': 86400e3, US1D: 86400e3 };
+const IV_MS = { '1m': 60e3, '3m': 180e3, '5m': 300e3, '15m': 900e3, '30m': 1800e3, '1h': 3600e3, '2h': 7200e3, '4h': 14400e3, '6h': 21600e3, '8h': 28800e3, '12h': 43200e3, '1d': 86400e3, '3d': 259200e3, '1w': 604800e3, '1M': 2592000e3, US1D: 86400e3 };
 export const ST_COLOR = { TURTLE: '#f0b90b', ADX: '#3d8bfd', TSMOM: '#c77dff', QQQ_EMA_TREND: '#26c6da', QQQ_TSMOM: '#ff8a65', QQQ_SMA200: '#9ccc65', QQQ_TURTLE_50_20: '#ffd54f' };
 const toggleKey = (st) => (st.startsWith('QQQ_') ? 'QQQ' : st);
 const TZ = -new Date().getTimezoneOffset() * 60; // display local time
@@ -50,7 +50,7 @@ export class ChartView {
     this.data = rows.map((r) => ({ time: toT(r.t), open: r.o, high: r.h, low: r.l, close: r.c, v: r.v }));
     this.candle.setData(this.data.map(({ v, ...c }) => c));
     this.vol.setData(this.data.map((c) => ({ time: c.time, value: c.v, color: c.close >= c.open ? 'rgba(14,203,129,.35)' : 'rgba(246,70,93,.35)' })));
-    this.chart.applyOptions({ timeScale: { timeVisible: this.interval !== '1d' && this.interval !== 'US1D' } });
+    this.chart.applyOptions({ timeScale: { timeVisible: !['1d', '3d', '1w', '1M', 'US1D'].includes(this.interval) } });
     this.drawSma();
     this.markerSig = '';
     this.precisionKey = '';

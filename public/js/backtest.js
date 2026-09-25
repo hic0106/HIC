@@ -1,6 +1,7 @@
 // BACKTEST screen: replay of the current strategy settings over past Binance data (no orders).
 import { $, $$, esc, fNum, fSigned, fPct, fDateTime, cls, api, toast } from './util.js';
 import { ST_COLOR } from './chart.js';
+import { TF } from './ko.js';
 import { mountAi } from './ai.js';
 
 const LC = window.LightweightCharts;

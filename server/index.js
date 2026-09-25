@@ -6,7 +6,7 @@ import express from 'express';
 import { WebSocketServer } from 'ws';
 import { Store, SYMBOLS } from './store.js';
 import { Logger } from './logger.js';
-import { MarketData, CHART_INTERVALS, SESSION_INTERVAL } from './marketData.js';
+import { MarketData, CHART_INTERVALS, CHART_CHOICES, SESSION_INTERVAL } from './marketData.js';
 import { Engine } from './engine.js';
 import { ALL_STRATEGIES as STRATEGIES, META as STRATEGY_META, STRATEGY_CLASS, strategiesForSymbol, CRYPTO_STRATEGIES, TRADFI_STRATEGIES } from './strategyRegistry.js';
 import { SYMBOL_META, ASSET_CLASSES, CLASS_LABEL, isSessionSymbol } from './assets.js';
@@ -78,7 +78,7 @@ const confirmed = (req, word) => String(req.body?.confirm || '').trim().toUpperC
 
 app.get('/api/snapshot', (req, res) => res.json(fullSnapshot()));
 app.get('/api/config', (req, res) => res.json({ config: store.config, meta: {
-  symbols: SYMBOLS, strategies: STRATEGIES, intervals: CHART_INTERVALS, sessionInterval: SESSION_INTERVAL,
+  symbols: SYMBOLS, strategies: STRATEGIES, intervals: CHART_INTERVALS, chartIntervals: CHART_CHOICES, sessionInterval: SESSION_INTERVAL,
   supportsShort: Object.fromEntries(STRATEGIES.map((s) => [s, STRATEGY_META[s].supportsShort])),
   labels: Object.fromEntries(STRATEGIES.map((s) => [s, STRATEGY_META[s].label])),
   strategyClass: STRATEGY_CLASS, cryptoStrategies: CRYPTO_STRATEGIES, tradfiStrategies: TRADFI_STRATEGIES,
@@ -174,7 +174,7 @@ app.get('/api/logs', (req, res) => res.json(log.recent(1000)));
 
 app.get('/api/klines', async (req, res) => {
   const { symbol, interval } = req.query;
-  const okIv = CHART_INTERVALS.includes(interval) || (interval === SESSION_INTERVAL && isSessionSymbol(symbol));
+  const okIv = CHART_CHOICES.includes(interval) || (interval === SESSION_INTERVAL && isSessionSymbol(symbol));
   if (!SYMBOLS.includes(symbol) || !okIv) return res.status(400).json({ ok: false, msg: 'bad params' });
   try { res.json(await md.chartKlines(symbol, interval, 1000)); } catch (e) { res.status(502).json({ ok: false, msg: e.message }); }
 });

@@ -166,3 +166,28 @@ test('market data: non-streamed interval is polled via REST after each close and
   assert.ok(closes.length > 0 && closes.every((x) => x === '3m'));
   assert.equal(await md.ensureInterval('3m'), false, 'already loaded');
 });
+
+test('chart: non-streamed interval follows price ticks, then refreshes the closed candle from REST', async () => {
+  const { MarketData } = await import('../server/marketData.js');
+  const md = new MarketData(['BTCUSDT'], { info() {}, warn() {}, error() {} });
+  const now = Date.now();
+  const t = Math.floor(now / 180_000) * 180_000;
+  md.rest = { klines: async (s, iv, limit) => (limit === 3 ? [[t, '100', '101', '99', '100.5', '1', t + 179_999, '1'], [t + 180_000, '100.5', '100.5', '100.5', '100.5', '0', t + 359_999, '0']] : [[t, '100', '100', '100', '100', '1', t + 179_999, '1']]) };
+  await md.chartKlines('BTCUSDT', '3m');
+  const ev = [];
+  md.on('kline', (k) => ev.push(k));
+  md.onChartPrice('BTCUSDT', 105, now);
+  const bar = md.chartCache.get('BTCUSDT:3m').candles.at(-1);
+  assert.equal(bar.c, 105);
+  assert.equal(bar.h, 105);
+  assert.equal(ev[0].interval, '3m');
+  md.onChartPrice('BTCUSDT', 106, t + 181_000); // candle over -> REST tail refresh
+  await new Promise((r) => setTimeout(r, 10));
+  const c = md.chartCache.get('BTCUSDT:3m').candles;
+  assert.equal(c.length, 2);
+  assert.equal(c[0].c, 100.5, 'closed candle replaced by the exchange values');
+  // streamed intervals are not touched
+  md.chartCache.set('BTCUSDT:4h', { sym: 'BTCUSDT', interval: '4h', usedAt: now, candles: [{ t, c: 1, h: 1, l: 1, T: now + 1e6 }] });
+  md.onChartPrice('BTCUSDT', 200, now);
+  assert.equal(md.chartCache.get('BTCUSDT:4h').candles[0].c, 1);
+});
