@@ -2,8 +2,9 @@
 import crypto from 'node:crypto';
 
 export const ENDPOINTS = {
-  mainnet: { rest: 'https://fapi.binance.com', ws: 'wss://fstream.binance.com' },
-  testnet: { rest: 'https://demo-fapi.binance.com', ws: 'wss://demo-fstream.binance.com' },
+  // spot: wallet API (/sapi) for balances of all wallets (read-only, USER_DATA). Not available on the futures demo.
+  mainnet: { rest: 'https://fapi.binance.com', ws: 'wss://fstream.binance.com', spot: 'https://api.binance.com' },
+  testnet: { rest: 'https://demo-fapi.binance.com', ws: 'wss://demo-fstream.binance.com', spot: null },
 };
 
 // Env overrides (used by the local mock exchange for development).
@@ -12,6 +13,7 @@ export function endpoints(testnet) {
   return {
     rest: process.env.BINANCE_REST_BASE || base.rest,
     ws: process.env.BINANCE_WS_BASE || base.ws,
+    spot: process.env.BINANCE_SPOT_BASE || base.spot,
   };
 }
 
@@ -29,8 +31,9 @@ export class BinanceError extends Error {
 const TS_MARGIN_MS = 500; // sign 0.5 s in the past: tolerates clock drift ahead (limit +1 s) within recvWindow 5 s
 
 export class BinanceClient {
-  constructor({ restBase, apiKey = '', apiSecret = '', timeoutMs = 10000 }) {
+  constructor({ restBase, spotBase = null, apiKey = '', apiSecret = '', timeoutMs = 10000 }) {
     this.restBase = restBase;
+    this.spotBase = spotBase;
     this.apiKey = apiKey;
     this.apiSecret = apiSecret;
     this.timeoutMs = timeoutMs;
@@ -82,23 +85,23 @@ export class BinanceClient {
   // Binance rejects a signed request (-1021) if timestamp > serverTime + 1000 ms or serverTime - timestamp > recvWindow.
   // The PC clock drifts: re-sync every 10 min, sign slightly in the past (margin), and on -1021 re-sync + retry once
   // (-1021 = rejected before processing, so a retry never duplicates an order).
-  async signed(method, path, params = {}) {
+  async signed(method, path, params = {}, base = this.restBase) {
     if (!this.hasKeys()) throw new BinanceError('API key not configured', { definitive: true, code: 'NO_KEYS' });
     if (Date.now() - this.timeSyncedAt > 10 * 60_000) { try { await this.syncTime(); } catch { /* keep last offset */ } }
     try {
-      return await this._signedOnce(method, path, params);
+      return await this._signedOnce(method, path, params, base);
     } catch (e) {
       if (!(e instanceof BinanceError) || e.code !== -1021) throw e;
       await this.syncTime();
-      return this._signedOnce(method, path, params);
+      return this._signedOnce(method, path, params, base);
     }
   }
 
-  async _signedOnce(method, path, params) {
+  async _signedOnce(method, path, params, base = this.restBase) {
     const p = { ...params, recvWindow: this.recvWindow, timestamp: Date.now() + this.timeOffset - TS_MARGIN_MS };
     const qs = new URLSearchParams(Object.entries(p).filter(([, v]) => v !== undefined && v !== null).map(([k, v]) => [k, String(v)])).toString();
     const sig = crypto.createHmac('sha256', this.apiSecret).update(qs).digest('hex');
-    return this._fetch(method, `${this.restBase}${path}?${qs}&signature=${sig}`, { 'X-MBX-APIKEY': this.apiKey });
+    return this._fetch(method, `${base}${path}?${qs}&signature=${sig}`, { 'X-MBX-APIKEY': this.apiKey });
   }
 
   // USER_STREAM endpoints: API key header only, no signature.
@@ -110,6 +113,13 @@ export class BinanceClient {
   // ---- public
   exchangeInfo() { return this.publicGet('/fapi/v1/exchangeInfo'); }
   klines(symbol, interval, limit = 500) { return this.publicGet('/fapi/v1/klines', { symbol, interval, limit }); }
+  tickerPrices() { return this.publicGet('/fapi/v2/ticker/price'); } // all USDⓈ-M symbols: [{ symbol, price }]
+
+  // ---- wallet (read-only): balance of every Binance wallet (Spot, Funding, USDⓈ-M Futures, Earn ...) in USDT
+  walletBalance() {
+    if (!this.spotBase) return Promise.reject(new BinanceError('wallet API not available (testnet)', { definitive: true, code: 'NO_SPOT' }));
+    return this.signed('GET', '/sapi/v1/asset/wallet/balance', { quoteAsset: 'USDT', needBalanceDetail: 'true' }, this.spotBase);
+  }
 
   // ---- private
   account() { return this.signed('GET', '/fapi/v3/account'); }

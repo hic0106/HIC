@@ -327,3 +327,17 @@ test('binance client: -1021 timestamp ahead -> time re-sync and one retry; times
   await assert.rejects(c.signed('POST', '/fapi/v1/order', {}), /-2019/);
   assert.equal(calls, 1);
 });
+
+test('binance client: wallet balance of all wallets is a signed read on the spot API base (USDT quote)', async () => {
+  const { BinanceClient } = await import('../server/binance.js');
+  const c = new BinanceClient({ restBase: 'http://fapi', spotBase: 'http://spot', apiKey: 'k', apiSecret: 's' });
+  c.timeSyncedAt = Date.now();
+  let url = null;
+  c._fetch = async (m, u) => { url = new URL(u); return [{ walletName: 'Spot', balance: '1' }]; };
+  await c.walletBalance();
+  assert.equal(url.origin, 'http://spot');
+  assert.equal(url.pathname, '/sapi/v1/asset/wallet/balance');
+  assert.equal(url.searchParams.get('quoteAsset'), 'USDT');
+  assert.ok(url.searchParams.get('signature'));
+  await assert.rejects(new BinanceClient({ restBase: 'x', apiKey: 'k', apiSecret: 's' }).walletBalance(), /not available/);
+});

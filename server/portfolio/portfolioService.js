@@ -50,6 +50,7 @@ export class PortfolioService extends EventEmitter {
     const every = (ms, fn) => { const t = setInterval(() => fn().catch?.((e) => this.log.warn(`portfolio: ${e.message}`, 'PORTFOLIO')), ms); t.unref?.(); this.timers.push(t); };
     every(15_000, async () => this.tick());
     every(60_000, async () => this.refreshIncome());
+    every(60_000, async () => this.refreshWallets());
     every(60_000, async () => this.recordEquity());
     this.tick().catch(() => {});
   }
@@ -115,8 +116,54 @@ export class PortfolioService extends EventEmitter {
       wallet: Number(acct.totalWalletBalance), available: Number(acct.availableBalance),
       marginBalance: Number(acct.totalMarginBalance), unrealized: Number(acct.totalUnrealizedProfit),
       positionInitialMargin: Number(acct.totalPositionInitialMargin ?? acct.totalInitialMargin) || null,
+      // every asset in the futures wallet (single-asset mode: the totals above count USDT only)
+      assets: (acct.assets || []).map((a) => ({ asset: a.asset, wallet: Number(a.walletBalance), margin: Number(a.marginBalance ?? a.walletBalance), unrealized: Number(a.unrealizedProfit) || 0 }))
+        .filter((a) => Math.abs(a.wallet) > 1e-9 || Math.abs(a.margin) > 1e-9),
       positions,
     };
+    this.priceAssets().catch(() => {});
+    this.refreshWallets(true).catch(() => {});
+  }
+
+  async priceAssets() {
+    const ex = this.exchange;
+    if (!ex?.assets?.length) return;
+    const px = await this.assetPrices(ex.assets.map((a) => a.asset));
+    for (const a of ex.assets) { a.price = px[a.asset] ?? null; a.valueUsdt = a.price != null ? a.margin * a.price : null; }
+    ex.assetsTotalUsdt = ex.assets.reduce((s, a) => s + (a.valueUsdt || 0), 0);
+    ex.assetsUnpriced = ex.assets.filter((a) => a.valueUsdt == null).map((a) => a.asset);
+  }
+
+  // USDT value of an asset (futures ticker <ASSET>USDT, cached 60 s). USDT = 1, unknown = null.
+  async assetPrices(assets) {
+    if (!assets.some((a) => a !== 'USDT')) return { USDT: 1 };
+    if (!this._px || this.now() - this._px.at > 60_000) {
+      const rows = await this.md.rest.tickerPrices();
+      this._px = { at: this.now(), map: Object.fromEntries((Array.isArray(rows) ? rows : []).map((r) => [r.symbol, Number(r.price)])) };
+    }
+    const out = { USDT: 1 };
+    for (const a of assets) if (a !== 'USDT') out[a] = this._px.map[`${a}USDT`] ?? (a === 'USDC' || a === 'FDUSD' ? 1 : null);
+    return out;
+  }
+
+  // All Binance wallets (read-only, "Enable Reading"): Spot, Funding, USDⓈ-M Futures, Earn ... in USDT.
+  async refreshWallets(soon = false) {
+    if (!this.isLive() || this._walletBusy) return;
+    if (soon && this.wallets && this.now() - this.wallets.at < 60_000) return;
+    this._walletBusy = true;
+    try {
+      const rows = await this.engine.liveClient.walletBalance();
+      const list = (Array.isArray(rows) ? rows : []).map((w) => ({
+        name: w.walletName, balance: Number(w.balance) || 0, active: w.activate !== false,
+        assets: (w.assetBalances || []).map((b) => ({ asset: b.asset, free: Number(b.free) || 0, locked: Number(b.locked) || 0, freeze: Number(b.freeze) || 0 })).filter((b) => b.free + b.locked + b.freeze > 0),
+      }));
+      this.wallets = { at: this.now(), error: null, list, total: list.reduce((s, w) => s + w.balance, 0) };
+    } catch (e) {
+      this.wallets = { ...(this.wallets || { list: [], total: null }), at: this.now(), error: e.message };
+      if (!this._walletErr || this.now() - this._walletErr > 600_000) { this._walletErr = this.now(); this.log.warn(`Wallet balance lookup failed: ${e.message}`, 'PORTFOLIO'); }
+    } finally {
+      this._walletBusy = false;
+    }
   }
 
   // ACCOUNT_UPDATE: a.B balances { a, wb, cw, bc }, a.P positions { s, pa, ep, up, ps, ... }, a.m reason
@@ -254,7 +301,8 @@ export class PortfolioService extends EventEmitter {
     if (!ex) {
       return { source: acct ? 'REST (account only)' : 'NO DATA', live: true, wallet: acct?.wallet ?? null, available: acct?.available ?? null, marginBalance: acct?.equity ?? null, unrealized: acct?.unrealized ?? null, positions: [], updatedAt: this.engine.live.lastCheck || null, stream: this.uds?.status || 'OFF', error: this.engine.live.error };
     }
-    return { source: ex.source, live: true, wallet: ex.wallet, available: ex.available, marginBalance: ex.marginBalance, unrealized: ex.unrealized, positions: ex.positions, updatedAt: Math.max(ex.restAt || 0, ex.wsAt || 0), restAt: ex.restAt, wsAt: ex.wsAt, stream: this.uds?.status || 'OFF', error: ex.error };
+    return { source: ex.source, live: true, wallet: ex.wallet, available: ex.available, marginBalance: ex.marginBalance, unrealized: ex.unrealized, positions: ex.positions, updatedAt: Math.max(ex.restAt || 0, ex.wsAt || 0), restAt: ex.restAt, wsAt: ex.wsAt, stream: this.uds?.status || 'OFF', error: ex.error,
+      assets: ex.assets || [], assetsTotalUsdt: ex.assetsTotalUsdt ?? null, assetsUnpriced: ex.assetsUnpriced || [], wallets: this.wallets || null };
   }
 
   build() {

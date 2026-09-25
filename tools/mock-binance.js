@@ -96,7 +96,7 @@ function klines(sym, interval, limit, startTime) {
 }
 
 // ---- simulated account (hedge mode)
-const acct = { wallet: 5000, dual: true, leverage: Object.fromEntries(Object.keys(SYMS).map((s) => [s, 1])), positions: {}, orders: {} };
+const acct = { wallet: 5000, otherAssets: { BNB: 0.5, USDC: 120 }, spot: { USDT: 300, BTC: 0.002, ETH: 0.05 }, dual: true, leverage: Object.fromEntries(Object.keys(SYMS).map((s) => [s, 1])), positions: {}, orders: {} };
 const posKey = (s, side) => `${s}:${side}`;
 function unreal() {
   let u = 0;
@@ -114,7 +114,7 @@ const server = http.createServer((req, res) => {
   const u = new URL(req.url, `http://${req.headers.host}`);
   const q = Object.fromEntries(u.searchParams);
   const p = u.pathname;
-  const priv = !['/fapi/v1/time', '/fapi/v1/exchangeInfo', '/fapi/v1/klines', '/fapi/v1/fundingRate', '/fapi/v1/ticker/24hr'].includes(p) && !p.startsWith('/mock/');
+  const priv = !['/fapi/v1/time', '/fapi/v1/exchangeInfo', '/fapi/v1/klines', '/fapi/v1/fundingRate', '/fapi/v1/ticker/24hr', '/fapi/v2/ticker/price'].includes(p) && !p.startsWith('/mock/');
   if (priv && !req.headers['x-mbx-apikey']) return json(res, 401, { code: -2015, msg: 'Invalid API-key' });
   if (p === '/fapi/v1/time') return json(res, 200, { serverTime: Date.now() });
   if (p === '/fapi/v1/exchangeInfo') {
@@ -122,6 +122,18 @@ const server = http.createServer((req, res) => {
       baseAsset: s.replace(/USDT$/, ''), quoteAsset: 'USDT', marginAsset: 'USDT', underlyingType: c.tradfi ? 'EQUITY' : 'COIN',
       onboardDate: Date.now() - (c.listedDays ?? 1500) * 86_400_000,
       filters: [{ filterType: 'PRICE_FILTER', tickSize: c.tick }, { filterType: 'LOT_SIZE', stepSize: c.step, minQty: c.minQty, maxQty: '1000000' }, { filterType: 'MARKET_LOT_SIZE', stepSize: c.step, minQty: c.minQty, maxQty: '100000' }, { filterType: 'MIN_NOTIONAL', notional: c.minNotional }] })) });
+  }
+  if (p === '/fapi/v2/ticker/price') return json(res, 200, Object.keys(SYMS).map((s) => ({ symbol: s, price: String(hist[s].price) })));
+  if (p === '/sapi/v1/asset/wallet/balance') {
+    const px = (a) => (a === 'USDT' ? 1 : hist[`${a}USDT`]?.price ?? 0);
+    const futUsdt = acct.wallet + Object.entries(acct.otherAssets).reduce((t, [a, v]) => t + v * px(a), 0);
+    const spotUsdt = Object.entries(acct.spot).reduce((t, [a, v]) => t + v * px(a), 0);
+    return json(res, 200, [
+      { activate: true, balance: String(spotUsdt), walletName: 'Spot', assetBalances: Object.entries(acct.spot).map(([a, v]) => ({ asset: a, free: String(v), locked: '0', freeze: '0' })) },
+      { activate: true, balance: '0', walletName: 'Funding', assetBalances: [] },
+      { activate: true, balance: String(futUsdt), walletName: 'USDⓈ-M Futures', assetBalances: [] },
+      { activate: true, balance: '0', walletName: 'Earn', assetBalances: [] },
+    ]);
   }
   if (p === '/fapi/v1/ticker/24hr') {
     const row = (s) => ({ symbol: s, lastPrice: String(hist[s].price), volume: String(SYMS[s].qv / hist[s].price), quoteVolume: String(SYMS[s].qv), closeTime: Date.now() });
@@ -141,6 +153,9 @@ const server = http.createServer((req, res) => {
   if (p === '/fapi/v3/account') {
     const u2 = unreal();
     return json(res, 200, { totalWalletBalance: String(acct.wallet), totalUnrealizedProfit: String(u2), totalMarginBalance: String(acct.wallet + u2), availableBalance: String(acct.wallet + u2 - margin()),
+      // single-asset mode: totals are USDT only; other assets are listed here
+      assets: [{ asset: 'USDT', walletBalance: String(acct.wallet), unrealizedProfit: String(u2), marginBalance: String(acct.wallet + u2) },
+        ...Object.entries(acct.otherAssets).map(([a, v]) => ({ asset: a, walletBalance: String(v), unrealizedProfit: '0', marginBalance: String(v) }))],
       positions: Object.values(acct.positions).map((x) => ({ symbol: x.symbol, positionSide: x.side, positionAmt: String(x.side === 'LONG' ? x.qty : -x.qty) })) });
   }
   if (p === '/fapi/v3/positionRisk') {

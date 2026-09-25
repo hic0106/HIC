@@ -88,6 +88,7 @@ function renderSummary() {
     kpi('총 자산 <i>USDT</i>', fUsd(s.equity), '', d.exchange.live ? `실전 · Binance ${esc(d.exchange.source === 'WS' ? '실시간' : d.exchange.source === 'REST' ? '조회' : d.exchange.source)}` : '모의투자', true),
     kpi('오늘 손익 <i>09시 기준</i>', fSigned(s.todayPnl), cls(s.todayPnl), s.baseCapital ? fPct(s.todayPnl / s.baseCapital * 100) : '', true),
     kpi('총 수익률', s.totalReturnPct != null ? fPct(s.totalReturnPct) : '—', cls(s.totalReturnPct), s.baseCapital ? `원금 ${fUsd(s.baseCapital, 0)}` : '원금 미설정', true),
+    ...(d.exchange.live && d.exchange.wallets?.total != null ? [kpi('Binance 전체 자산 <i>USDT</i>', fUsd(d.exchange.wallets.total), '', '모든 지갑 합계')] : []),
     kpi('주문 가능', fUsd(s.available)), kpi('투자 원금', fUsd(s.invested), '', '진입가 기준'), kpi('포지션 가치', fUsd(s.positionValue), '', '현재가 기준'),
     kpi('평가손익', fSigned(s.unrealized), cls(s.unrealized), '거래소 기준'), kpi('오늘 실현손익', fSigned(s.realizedToday), cls(s.realizedToday), s.realizedTodaySource === 'BINANCE_INCOME' ? 'Binance 정산 기준' : '봇 장부 기준'),
     kpi('누적 손익', fSigned(s.totalPnl), cls(s.totalPnl), '수수료·펀딩 반영'),
@@ -145,11 +146,29 @@ function renderExchange() {
   const f = (sym) => P.data._filters?.[sym];
   $('#pfExSrc').textContent = e.live ? `Binance · ${e.source === 'WS' ? '실시간 반영' : '주기 조회'}${e.stream ? ' · 실시간 연결 ' + ({ CONNECTED: '연결됨', CONNECTING: '연결 중', DISCONNECTED: '끊김', ERROR: '오류', OFF: '꺼짐' }[e.stream] || e.stream) : ''}${e.updatedAt ? ' · ' + fZone(e.updatedAt) : ''}` : '모의투자 가상 계좌';
   $('#pfExchange').innerHTML = `<table class="t compact kv pf-kv"><tbody>
-      <tr><td>지갑 잔고</td><td>${fUsd(e.wallet)}</td><td>총 자산 (마진 잔고)</td><td>${fUsd(e.marginBalance)}</td></tr>
+      <tr><td>지갑 잔고</td><td>${fUsd(e.wallet)}</td><td>USDT 마진 잔고</td><td>${fUsd(e.marginBalance)}</td></tr>
       <tr><td>주문 가능</td><td>${fUsd(e.available)}</td><td>평가손익</td><td class="${cls(e.unrealized)}">${fSigned(e.unrealized)}</td></tr>
       ${e.error ? `<tr><td colspan="4" class="l down">${esc(e.error)}</td></tr>` : ''}</tbody></table>
+    ${assetsHtml(e)}
     ${e.positions.length ? `<table class="t compact"><thead><tr><th>종목</th><th>방향</th><th>수량</th><th>진입가</th><th>현재가</th><th>포지션 금액</th><th>증거금</th><th>평가손익</th><th>청산가</th><th>레버리지</th></tr></thead><tbody>
       ${e.positions.map((p) => `<tr><td class="l">${p.symbol}</td><td class="l side-${p.side}">${SIDE[p.side]}</td><td>${p.qty}</td><td>${fPrice(p.entryPrice, f(p.symbol))}</td><td>${fPrice(p.markPrice, f(p.symbol))}</td><td>${fNum(p.notional, 2)}</td><td>${fNum(p.initialMargin, 2)}</td><td class="${cls(p.unrealized)}">${fSigned(p.unrealized)}</td><td>${p.liquidationPrice ? fPrice(p.liquidationPrice, f(p.symbol)) : '—'}</td><td>${p.leverage ? p.leverage + '배' : '—'}</td></tr>`).join('')}</tbody></table>` : '<div class="empty">거래소 포지션 없음</div>'}`;
+}
+
+const WALLET_KO = { Spot: '현물', Funding: '펀딩', 'Cross Margin': '교차 마진', 'Isolated Margin': '격리 마진', 'USDⓈ-M Futures': 'USDⓈ-M 선물', 'COIN-M Futures': 'COIN-M 선물', Earn: 'Earn', Options: '옵션', 'Trading Bots': '트레이딩 봇', 'Copy Trading': '카피 트레이딩' };
+// futures wallet: every asset (the totals above are USDT only in single-asset mode) + every Binance wallet
+function assetsHtml(e) {
+  if (!e.live) return '';
+  const other = (e.assets || []).filter((a) => a.asset !== 'USDT');
+  const fut = (e.assets || []).length ? `<div class="sub-h">선물 지갑 자산 <span class="muted">USDT 외 자산 포함 · 합계 ${fUsd(e.assetsTotalUsdt)}${other.length ? ' · 위 총 자산은 USDT만 계산 (단일자산 모드)' : ''}</span></div>
+    <table class="t compact"><thead><tr><th>자산</th><th>지갑 잔고</th><th>마진 잔고</th><th>평가손익</th><th>가격 (USDT)</th><th>USDT 환산</th></tr></thead><tbody>
+    ${e.assets.map((a) => `<tr><td class="l"><b>${esc(a.asset)}</b></td><td>${fNum(a.wallet, 6)}</td><td>${fNum(a.margin, 6)}</td><td class="${cls(a.unrealized)}">${fSigned(a.unrealized, 4)}</td><td>${a.price != null ? fNum(a.price, 4) : '—'}</td><td>${a.valueUsdt != null ? fUsd(a.valueUsdt) : '<span class="muted">가격 없음</span>'}</td></tr>`).join('')}</tbody></table>` : '';
+  const w = e.wallets;
+  const all = !w ? '<div class="empty">Binance 전체 지갑 조회 중…</div>'
+    : w.error && !w.list.length ? `<div class="empty down">전체 지갑 조회 실패: ${esc(w.error)}</div>`
+    : `<div class="sub-h">Binance 전체 자산 <span class="muted">모든 지갑 · USDT 환산 · 합계 <b>${fUsd(w.total)}</b>${w.at ? ' · ' + fZone(w.at) : ''}${w.error ? ` · <span class="warn">마지막 조회 실패: ${esc(w.error)}</span>` : ''}</span></div>
+    <table class="t compact"><thead><tr><th>지갑</th><th>잔고 (USDT)</th><th class="l">자산</th></tr></thead><tbody>
+    ${w.list.filter((x) => x.balance > 0 || x.assets.length).map((x) => `<tr><td class="l">${esc(WALLET_KO[x.name] || x.name)}</td><td>${fUsd(x.balance)}</td><td class="l muted">${x.assets.slice(0, 12).map((b) => `${esc(b.asset)} ${fNum(b.free + b.locked + b.freeze, 6)}`).join(' · ')}</td></tr>`).join('') || '<tr><td colspan="3" class="muted">잔고 없음</td></tr>'}</tbody></table>`;
+  return fut + all;
 }
 
 function renderRecon() {

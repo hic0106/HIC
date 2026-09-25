@@ -161,7 +161,7 @@ export class Engine {
   rebuildLiveClient() {
     const s = this.store.secrets;
     const ep = endpoints(!!s.testnet);
-    this.liveClient = new BinanceClient({ restBase: ep.rest, apiKey: s.apiKey, apiSecret: s.apiSecret });
+    this.liveClient = new BinanceClient({ restBase: ep.rest, spotBase: ep.spot, apiKey: s.apiKey, apiSecret: s.apiSecret });
     this.live = { ...this.live, status: this.liveClient.hasKeys() ? 'UNVERIFIED' : 'NO_KEYS', hedgeMode: null, leverage: {}, account: null, error: null };
   }
 
