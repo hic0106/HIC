@@ -303,3 +303,27 @@ test('live: missing Binance stop is re-placed only if exchange holds the positio
   await engine.syncExchangeStops();
   assert.equal(ex.calls.filter((c) => c[0] === 'algo').length, before);
 });
+
+test('binance client: -1021 timestamp ahead -> time re-sync and one retry; timestamp signed with offset', async () => {
+  const { BinanceClient } = await import('../server/binance.js');
+  const c = new BinanceClient({ restBase: 'http://x', apiKey: 'k', apiSecret: 's' });
+  let serverSkew = -3000; // PC clock 3 s ahead of Binance
+  let syncs = 0, calls = 0;
+  c.publicGet = async (p) => { if (p === '/fapi/v1/time') { syncs++; return { serverTime: Date.now() + serverSkew }; } return {}; };
+  c._fetch = async (method, url) => {
+    calls++;
+    const ts = Number(new URL(url).searchParams.get('timestamp'));
+    const server = Date.now() + serverSkew;
+    if (ts > server + 1000) throw new BinanceError('HTTP 400 -1021 Timestamp for this request was 1000ms ahead of the server\'s time.', { code: -1021, status: 400, definitive: true });
+    return { ok: true };
+  };
+  c.timeSyncedAt = Date.now(); c.timeOffset = 0; // stale offset from before the drift
+  assert.deepEqual(await c.signed('GET', '/fapi/v3/account'), { ok: true });
+  assert.equal(syncs, 1);
+  assert.equal(calls, 2);
+  // other errors are not retried
+  c._fetch = async () => { calls++; throw new BinanceError('HTTP 400 -2019 Margin is insufficient.', { code: -2019, status: 400, definitive: true }); };
+  calls = 0;
+  await assert.rejects(c.signed('POST', '/fapi/v1/order', {}), /-2019/);
+  assert.equal(calls, 1);
+});

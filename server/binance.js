@@ -26,6 +26,8 @@ export class BinanceError extends Error {
   }
 }
 
+const TS_MARGIN_MS = 500; // sign 0.5 s in the past: tolerates clock drift ahead (limit +1 s) within recvWindow 5 s
+
 export class BinanceClient {
   constructor({ restBase, apiKey = '', apiSecret = '', timeoutMs = 10000 }) {
     this.restBase = restBase;
@@ -33,6 +35,7 @@ export class BinanceClient {
     this.apiSecret = apiSecret;
     this.timeoutMs = timeoutMs;
     this.timeOffset = 0;
+    this.timeSyncedAt = 0;
     this.recvWindow = 5000;
   }
 
@@ -72,12 +75,27 @@ export class BinanceClient {
     const r = await this.publicGet('/fapi/v1/time');
     const t1 = Date.now();
     this.timeOffset = r.serverTime - Math.round((t0 + t1) / 2);
+    this.timeSyncedAt = t1;
     return this.timeOffset;
   }
 
+  // Binance rejects a signed request (-1021) if timestamp > serverTime + 1000 ms or serverTime - timestamp > recvWindow.
+  // The PC clock drifts: re-sync every 10 min, sign slightly in the past (margin), and on -1021 re-sync + retry once
+  // (-1021 = rejected before processing, so a retry never duplicates an order).
   async signed(method, path, params = {}) {
     if (!this.hasKeys()) throw new BinanceError('API key not configured', { definitive: true, code: 'NO_KEYS' });
-    const p = { ...params, recvWindow: this.recvWindow, timestamp: Date.now() + this.timeOffset };
+    if (Date.now() - this.timeSyncedAt > 10 * 60_000) { try { await this.syncTime(); } catch { /* keep last offset */ } }
+    try {
+      return await this._signedOnce(method, path, params);
+    } catch (e) {
+      if (!(e instanceof BinanceError) || e.code !== -1021) throw e;
+      await this.syncTime();
+      return this._signedOnce(method, path, params);
+    }
+  }
+
+  async _signedOnce(method, path, params) {
+    const p = { ...params, recvWindow: this.recvWindow, timestamp: Date.now() + this.timeOffset - TS_MARGIN_MS };
     const qs = new URLSearchParams(Object.entries(p).filter(([, v]) => v !== undefined && v !== null).map(([k, v]) => [k, String(v)])).toString();
     const sig = crypto.createHmac('sha256', this.apiSecret).update(qs).digest('hex');
     return this._fetch(method, `${this.restBase}${path}?${qs}&signature=${sig}`, { 'X-MBX-APIKEY': this.apiKey });
