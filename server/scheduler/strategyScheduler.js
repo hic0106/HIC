@@ -8,7 +8,7 @@ import { strategiesForSymbol, STRATEGY_CLASS } from '../strategyRegistry.js';
 import { SYMBOLS } from '../store.js';
 import { SYMBOL_META } from '../assets.js';
 import { marketStatus, nextSessionClose, DEFAULT_US_CALENDAR } from '../session.js';
-import { timeframeOf, barsFor, scheduleTypeOf, TF_MS, TF_LABEL, US_SESSION } from './timeframes.js';
+import { timeframeOf, barsFor, scheduleTypeOf, TF_MS, TF_LABEL, US_SESSION, defaultGraceMin } from './timeframes.js';
 
 export const DEFAULT_SCHEDULER_CONFIG = {
   // A NEW entry is only executed if the signal candle closed at most this many minutes ago.
@@ -132,7 +132,7 @@ export class StrategyScheduler {
       if (e.lastEvaluatedCandle != null && closeT <= e.lastEvaluatedCandle) return { result: 'DUPLICATE', duplicate: true };
 
       const closedAt = closeT + 1;
-      const graceMin = this.scfg.entryGraceMin[inst.timeframe] ?? 60;
+      const graceMin = this.scfg.entryGraceMin[inst.timeframe] ?? defaultGraceMin(inst.timeframe);
       const ageMin = (now - closedAt) / 60_000;
       const stale = ageMin > graceMin;
       const missed = e.lastEvaluatedCandle != null ? bars.filter((c) => c.T > e.lastEvaluatedCandle && c.T < closeT).length : 0;
@@ -209,7 +209,7 @@ export class StrategyScheduler {
         lastCheckAt: e.lastCheckAt, lastResult: e.lastResult, evaluations: e.evaluations || 0,
         nextExpectedCandle: this.nextExpected(inst, last, now),
         status: unavailable ? 'UNAVAILABLE' : !enabled ? 'DISABLED' : !running ? 'STOPPED' : e.retry ? 'RETRYING' : 'RUNNING',
-        entryGraceMin: this.scfg.entryGraceMin[inst.timeframe],
+        entryGraceMin: this.scfg.entryGraceMin[inst.timeframe] ?? defaultGraceMin(inst.timeframe),
       };
       if (inst.timeframe === US_SESSION) {
         const m = marketStatus(now, this.calendar());

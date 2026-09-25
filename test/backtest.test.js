@@ -119,3 +119,50 @@ test('backtest: Turtle on 5m candles (signal on close, next-open fill) + 5m peri
   assert.equal(runner.effectiveDays(365, [{ s: 'BTCUSDT', tf: '5m' }, { s: 'BTCUSDT', tf: '1d' }]), MAX_DAYS['5m']);
   assert.equal(runner.effectiveDays(365, [{ s: 'BTCUSDT', tf: '4h' }]), 365);
 });
+
+test('timeframes: every Binance interval selectable for crypto strategies; caps and live-bar intervals follow the config', async () => {
+  const { BacktestRunner, MAX_DAYS } = await import('../server/backtest/backtestRunner.js');
+  const { validateStrategySettings } = await import('../server/strategyConfig.js');
+  const { barIntervalsFor, defaultGraceMin, KLINE_TIMEFRAMES } = await import('../server/scheduler/timeframes.js');
+  const c = cfg();
+  for (const name of ['TURTLE', 'ADX', 'TSMOM', 'RAYNER']) for (const tf of KLINE_TIMEFRAMES) {
+    assert.equal(validateStrategySettings(name, { ...structuredClone(c.strategies[name]), timeframe: tf }, c.strategies[name]).timeframe, tf, `${name} ${tf}`);
+  }
+  assert.equal(MAX_DAYS['1m'], 18);
+  assert.equal(MAX_DAYS['5m'], 90);
+  assert.equal(MAX_DAYS['1h'], undefined);
+  const runner = new BacktestRunner({ store: { config: c }, md: {}, log: { warn() {}, info() {}, error() {} }, rest: {} });
+  assert.equal(runner.effectiveDays(365, [{ s: 'BTCUSDT', tf: '1m' }]), 18);
+  assert.equal(runner.effectiveDays(365, [{ s: 'BTCUSDT', tf: '1w' }]), 365);
+  c.strategies.TURTLE.timeframe = '1m'; c.strategies.TSMOM.timeframe = '1d'; c.strategies.ADX.timeframe = '12h';
+  assert.deepEqual(barIntervalsFor(c).sort(), ['12h', '1m', '4h'].sort());
+  assert.equal(defaultGraceMin('1m'), 1);
+  assert.equal(defaultGraceMin('1h'), 30);
+  // Turtle on 1h candles: signal on close, fill at the next 1h open
+  c.strategies.TURTLE.timeframe = '1h';
+  const H1 = 3_600_000;
+  const bars = mk([...Array(300).fill(100), 110, 112, 115, 115, 115], H1);
+  const r = await backtestStrategy({ strategy: 'TURTLE', config: c, data: { BTCUSDT: bars }, start: bars[250].t, end: bars.at(-1).T + 1, capital: 1_000_000, symbols: ['BTCUSDT'] });
+  assert.equal(r.timeframe, '1h');
+  assert.equal(r.openPositions[0].entryTime, bars[301].t);
+});
+
+test('market data: non-streamed interval is polled via REST after each close and loaded on demand', async () => {
+  const { MarketData } = await import('../server/marketData.js');
+  const M3 = 180_000;
+  const t0 = Math.floor((Date.now() - 50 * M3) / M3) * M3;
+  const row = (t) => [t, '1', '1', '1', '1', '1', t + M3 - 1, '1'];
+  const all = Array.from({ length: 60 }, (_, i) => row(t0 + i * M3)).filter((r) => r[6] < Date.now());
+  const log = { info() {}, warn() {}, error() {} };
+  const md = new MarketData(['BTCUSDT'], log, { barIntervals: ['4h'] });
+  md.rest = { klines: async () => all.slice(0, 30), publicGet: async (p, q) => all.filter((r) => r[0] >= q.startTime).slice(0, q.limit) };
+  assert.equal(await md.ensureInterval('3m'), true);
+  assert.equal(md.s.BTCUSDT.bars['3m'].length, 30);
+  const closes = [];
+  md.on('candleClose', (e) => closes.push(e.interval));
+  md.pollBars('BTCUSDT', '3m', Date.now());
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(md.s.BTCUSDT.bars['3m'].length, all.length, 'caught up to the last closed 3m bar');
+  assert.ok(closes.length > 0 && closes.every((x) => x === '3m'));
+  assert.equal(await md.ensureInterval('3m'), false, 'already loaded');
+});

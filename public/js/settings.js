@@ -28,7 +28,9 @@ const paramInput = (k, v, st) => {
 
 let dirty = {};
 
+let S_META = {};
 export function renderStrategiesTab(root, S, onSaved) {
+  S_META = S.meta || {};
   if (Object.values(dirty).some(Boolean) && root.childElementCount) return; // keep unsaved edits
   const cfg = S.config;
   const mode = cfg.general.mode;
@@ -91,8 +93,8 @@ function stratCol(name, c, mode, supportsShort) {
     <div class="fr"><label>레버리지 (배)</label>${numIn('leverage', c.leverage ?? 1, 1, `min="1" max="${c.timeframe ? 20 : 10}"`)}</div>
     <div class="note">포지션 규모 = 주문금액 × 레버리지. 같은 종목의 거래소 레버리지는 켜진 전략 중 가장 높은 값으로 설정. 변경은 봇 정지 상태에서만 가능.</div>
     ${c.timeframe ? `<div class="set-sec">신호 캔들</div>
-    <div class="fr"><label>캔들 (마감 기준)</label><select name="timeframe">${['5m', '4h', '1d'].map((t) => `<option value="${t}" ${t === c.timeframe ? 'selected' : ''}>${TF[t]}</option>`).join('')}</select></div>
-    ${c.timeframe === '5m' ? '<div class="note warn">5분봉: 신호가 많고 수수료·슬리피지 비중이 큽니다. 백테스트는 최대 90일.</div>' : ''}` : ''}
+    <div class="fr"><label>캔들 (마감 기준)</label><select name="timeframe">${(S_META.timeframeChoices || ['5m', '4h', '1d']).map((t) => `<option value="${t}" ${t === c.timeframe ? 'selected' : ''}>${TF[t]}</option>`).join('')}</select></div>
+    ${['1m', '3m', '5m', '15m', '30m'].includes(c.timeframe) ? `<div class="note warn">${TF[c.timeframe]}봉: 신호가 많고 수수료·슬리피지 비중이 큽니다. 백테스트 기간은 약 26,000봉(${Math.floor(26000 * { '1m': 1, '3m': 3, '5m': 5, '15m': 15, '30m': 30 }[c.timeframe] / 1440)}일)까지.</div>` : ''}` : ''}
     <div class="set-sec">진입 / 청산 조건</div>
     ${PARAMS[name].map(([k, l, st]) => `<div class="fr"><label>${l}</label>${paramInput(k, c.params[k], st)}</div>`).join('')}
     <div class="set-sec">손절 (비상 Stop)</div>

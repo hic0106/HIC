@@ -11,8 +11,11 @@ import { historicalTradeSets, tradeFilterFrom, UNIVERSE_METHOD } from './histori
 import { universeConfig } from '../universe.js';
 
 const DAY = 86_400_000;
-// 5m candles: 288 per day per symbol -> the test period is capped (download size / Binance weight / run time)
-export const MAX_DAYS = { '5m': 90 };
+// Short candles: the test period is capped at ~26,000 bars per symbol (download size / Binance weight / run time)
+// 1m 18 days · 3m 54 · 5m 90 · 15m 270 · 30m 541 · 1h+ no cap below 1000 days
+const MAX_BARS = 26_000;
+export const MAX_DAYS = new Proxy({}, { get: (o, tf) => { const ms = TF_MS[tf]; return ms && ms < 3_600_000 ? Math.floor((MAX_BARS * ms) / DAY) : undefined; }, has: (o, tf) => !!TF_MS[tf] && TF_MS[tf] < 3_600_000 });
+const FUTURES_LAUNCH = Date.UTC(2019, 8, 1); // Binance USDⓈ-M launch: no data before
 const CHART_CANDLES_MAX = 6000; // candles kept per series for the result chart (most recent)
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const FILE = path.join(DATA_DIR, 'backtest-last.json');
@@ -46,19 +49,19 @@ export class BacktestRunner {
     const ms = TF_MS[interval];
     const out = new Map();
     let start = startTime;
-    const maxPages = Math.ceil((endTime - startTime) / (ms * 1500)) + 2;
+    const maxPages = Math.ceil((endTime - startTime) / ((ms || DAY) * 1500)) + 2;
     for (let guard = 0; guard < maxPages && start < endTime; guard++) {
       await this.pace();
       const rows = await this.rest.publicGet('/fapi/v1/klines', { symbol, interval, startTime: start, limit: 1500 });
       if (!Array.isArray(rows) || !rows.length) break;
       for (const r of rows) { const c = toCandle(r); out.set(c.t, c); }
       const lastT = rows[rows.length - 1][0];
-      if (lastT + ms <= start) break; // server ignored startTime
-      start = lastT + ms;
+      if (lastT < start) break; // server ignored startTime
+      start = lastT + 1; // next open (works for variable-length months too)
       if (rows.length < 1500) break;
     }
     const now = Date.now();
-    return [...out.values()].filter((c) => c.T < Math.min(now, endTime + ms)).sort((a, b) => a.t - b.t);
+    return [...out.values()].filter((c) => c.T < now).sort((a, b) => a.t - b.t);
   }
 
   async fundingRates(symbol, startTime, endTime) {
@@ -102,7 +105,7 @@ export class BacktestRunner {
       onMsg(`loading ${s} ${tf === US_SESSION ? 'US sessions' : tf}`, Math.round((k++ / (need.length + 3)) * 70));
       let rows;
       if (tf === US_SESSION || isSessionSymbol(s)) rows = await this.sessionCandles(s);
-      else rows = await this.klines(s, tf, c.start - (LIVE_WINDOW[tf] + 5) * TF_MS[tf], c.end); // live-equivalent warm-up before the start
+      else rows = await this.klines(s, tf, Math.max(FUTURES_LAUNCH, c.start - (LIVE_WINDOW[tf] + 5) * TF_MS[tf]), c.end); // live-equivalent warm-up before the start
       (c.data[tf] ||= {})[s] = rows;
     }
     if (config.general.includeFunding) {
@@ -173,7 +176,7 @@ export class BacktestRunner {
     try {
       const ctx = await this.loadData(config, days, this.needFor(config, strategies), (msg, progress) => { this.status.msg = msg; if (progress != null) this.status.progress = progress; });
       const { start, end, data } = ctx;
-      if (ctx.days < days) this.log.warn(`Backtest period shortened to ${ctx.days} days (5m candles: max ${MAX_DAYS['5m']} days)`, 'BACKTEST');
+      if (ctx.days < days) this.log.warn(`Backtest period shortened to ${ctx.days} days (short candles: max ~${MAX_BARS} bars per symbol)`, 'BACKTEST');
       const results = [];
       for (const [i, st] of strategies.entries()) {
         this.status.msg = `running ${st}`;

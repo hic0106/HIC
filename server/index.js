@@ -13,7 +13,7 @@ import { SYMBOL_META, ASSET_CLASSES, CLASS_LABEL, isSessionSymbol } from './asse
 import { Controller, CONTROLLER_MODES } from './controller/controllerEngine.js';
 import { StrategyScheduler } from './scheduler/strategyScheduler.js';
 import { SignalLog } from './scheduler/signalLog.js';
-import { CRYPTO_TIMEFRAME_CHOICES, TF_LABEL } from './scheduler/timeframes.js';
+import { CRYPTO_TIMEFRAME_CHOICES, TF_LABEL, barIntervalsFor, timeframeOf } from './scheduler/timeframes.js';
 import { RiskMonitor } from './risk/riskMonitor.js';
 import { PortfolioService } from './portfolio/portfolioService.js';
 import { BacktestRunner } from './backtest/backtestRunner.js';
@@ -33,7 +33,7 @@ const log = new Logger(store);
 // registered into SYMBOLS before market data, engine, scheduler and controller are built.
 const universe = new UniverseManager({ store, rest: new BinanceClient({ restBase: endpoints(false).rest }), log });
 await universe.init();
-const md = new MarketData(SYMBOLS, log, { getCalendar: () => store.config.general.usCalendar });
+const md = new MarketData(SYMBOLS, log, { getCalendar: () => store.config.general.usCalendar, barIntervals: barIntervalsFor(store.config) });
 const engine = new Engine(store, md, log);
 engine.universe = universe;
 // Controller layer: strategies -> controller (size multiplier) -> existing execution engine
@@ -195,6 +195,8 @@ app.post('/api/config/strategy/:name', (req, res) => {
     store.saveConfig();
     log.info(`${name} settings saved (${engine.mode}${engine.runState === 'RUNNING' ? ', applies from next evaluation; open positions keep their stops' : ''})`, 'CONFIG_SAVED', { leverage: next.leverage, amounts: next.amounts, params: next.params, stop: next.stop });
     engine.evaluateAll('config saved');
+    // new candle interval: load its history (all watched symbols), then evaluate again
+    if (md.status === 'CONNECTED') md.ensureInterval(timeframeOf(name, store.config)).then((loaded) => { if (loaded) engine.evaluateAll('interval loaded'); }).catch((e) => log.error(`interval load failed: ${e.message}`, 'API_ERROR'));
     ok(res);
   } catch (e) {
     ok(res, { ok: false, msg: e.message });
@@ -394,6 +396,7 @@ server.listen(PORT, HOST, async () => {
   const boot = async () => {
     try {
       await md.start();
+      for (const iv of barIntervalsFor(store.config)) await md.ensureInterval(iv); // intervals changed while booting
       await scheduler.catchUp('init');
       controller.start();
       portfolio.start();

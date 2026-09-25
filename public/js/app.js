@@ -7,7 +7,7 @@ import { mountController, unmountController, controllerHeaderHtml, statusTag } f
 import { renderScheduler, setSignals, addSignal, scheduleLine } from './scheduler.js';
 import { mountPortfolio, update as updatePortfolio } from './portfolio.js';
 import { mountBacktest } from './backtest.js';
-import { SIDE, MODE, STATUS, EXIT, ORDER_STATUS, STRAT, sigKo } from './ko.js';
+import { SIDE, MODE, STATUS, EXIT, ORDER_STATUS, STRAT, TF, sigKo } from './ko.js';
 
 const SHORT = { TURTLE: '터틀', ADX: 'ADX', TSMOM: 'TSMOM', RAYNER: 'Rayner', QQQ_EMA_TREND: 'QQQ EMA 추세', QQQ_TSMOM: 'QQQ TSMOM', QQQ_SMA200: 'QQQ SMA200', QQQ_TURTLE_50_20: 'QQQ 터틀 50/20' };
 const CHIP = { TURTLE: '터틀', ADX: 'ADX', TSMOM: 'TSM', RAYNER: 'RAY', QQQ_EMA_TREND: 'EMA', QQQ_TSMOM: 'TSM', QQQ_SMA200: 'SMA', QQQ_TURTLE_50_20: 'T50' };
@@ -372,7 +372,7 @@ function stratCard(s, st, sym, f) {
     add('숏 주문금액', isLongOnly(st) ? '롱 전용' : cfg.shortEnabled ? `${fNum(amt.short, 0)} USDT` : '꺼짐');
   }
   const tf = (s.scheduler || []).find((r) => r.strategy === st && r.symbol === sym);
-  const U = { '4H': '봉(4시간)', '5M': '봉(5분)' }[tf?.timeframeLabel] || '일';
+  const U = tf && tf.timeframe !== '1d' && TF[tf.timeframe] ? `봉(${TF[tf.timeframe]})` : '일';
   if (st === 'TURTLE') {
     const pp = cfg.params;
     add(`${pp.entryPeriod}${U} 최고가`, fPrice(v.entryHigh, f)); add(`${pp.entryPeriod}${U} 최저가`, fPrice(v.entryLow, f));

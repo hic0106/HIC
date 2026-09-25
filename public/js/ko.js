@@ -16,7 +16,7 @@ export const ORDER_STATUS = {
   SUBMITTED: '전송됨', FILLED: '체결', REJECTED: '거부', UNKNOWN: '확인 중', NOT_PLACED: '미접수', ACTIVE: '활성',
   NEW: '대기', PLACING: '등록 중', TRIGGERED: '발동', FAILED: '실패', REPLACE: '재등록', CANCELED: '취소',
 };
-export const TF = { '5m': '5분', '4h': '4시간', '1d': '1일', US_SESSION: '미국 정규장' };
+export const TF = { '1m': '1분', '3m': '3분', '5m': '5분', '15m': '15분', '30m': '30분', '1h': '1시간', '2h': '2시간', '4h': '4시간', '6h': '6시간', '8h': '8시간', '12h': '12시간', '1d': '1일', '3d': '3일', '1w': '1주', '1M': '1개월', US_SESSION: '미국 정규장' };
 export const STRAT = {
   TURTLE: '터틀', ADX: 'ADX', TSMOM: 'TSMOM', RAYNER: 'Rayner', QQQ_EMA_TREND: 'QQQ EMA', QQQ_TSMOM: 'QQQ TSMOM', QQQ_SMA200: 'QQQ SMA200', QQQ_TURTLE_50_20: 'QQQ 터틀50/20', UNATTRIBUTED: '미귀속(수동)',
 };

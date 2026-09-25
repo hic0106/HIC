@@ -18,7 +18,8 @@
 import { META, evaluateStrategy, symbolsForStrategy, exitFor, entryStop, stopReasonOf, trendCounts, recordTrendEntry } from '../strategyRegistry.js';
 import { timeframeOf, US_SESSION } from '../scheduler/timeframes.js';
 
-export const LIVE_WINDOW = { '5m': 1000, '4h': 1000, '1d': 500, [US_SESSION]: Infinity };
+// indicator window = what the live market data keeps: 1000 bars per interval, 500 daily
+export const LIVE_WINDOW = new Proxy({ '1d': 500, [US_SESSION]: Infinity }, { get: (o, k) => (k in o ? o[k] : 1000) });
 const dirOf = (side) => (side === 'LONG' ? 1 : -1);
 
 // custom (optional): { cfg, meta, timeframe, prepare(bars) -> (i) => signal } for AI rule strategies (server/ai/dsl.js)

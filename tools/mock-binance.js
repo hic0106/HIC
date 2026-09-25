@@ -9,6 +9,8 @@ const DAY = Number(process.env.MOCK_DAY_MS || 86_400_000);
 // intraday candles scale with the accelerated day (QQQ 30m bars stay real-time: US session calendar)
 const F = DAY / 86_400_000;
 const INTERVALS = { '5m': 300_000 * F, '15m': 900_000 * F, '30m': 1_800_000 * F, '1h': 3_600_000 * F, '4h': 14_400_000 * F, '1d': DAY };
+// REST klines: every Binance interval (1M ≈ 30 days); WS broadcasts only INTERVALS
+const REST_MS = { ...INTERVALS, '1m': 60_000 * F, '3m': 180_000 * F, '2h': 7_200_000 * F, '6h': 21_600_000 * F, '8h': 28_800_000 * F, '12h': 43_200_000 * F, '3d': 3 * DAY, '1w': 7 * DAY, '1M': 30 * DAY };
 const QQQ_MS = { '5m': 300_000, '15m': 900_000, '30m': 1_800_000, '1h': 3_600_000, '4h': 14_400_000 };
 // qv = synthetic 24h quote volume (USDT) for the universe ranking; listedDays = days since onboardDate
 const SYMS = {
@@ -61,7 +63,8 @@ for (const [s, c] of Object.entries(SYMS)) {
 }
 
 function klines(sym, interval, limit, startTime) {
-  const ms = SYMS[sym].tradfi && QQQ_MS[interval] ? QQQ_MS[interval] : INTERVALS[interval];
+  const ms = SYMS[sym].tradfi && QQQ_MS[interval] ? QQQ_MS[interval] : REST_MS[interval];
+  if (!ms) return [];
   const h = hist[sym];
   if (SYMS[sym].tradfi && interval !== '1d') {
     const now = Date.now();

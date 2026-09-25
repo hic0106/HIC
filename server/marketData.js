@@ -11,9 +11,11 @@ export const CHART_INTERVALS = ['5m', '15m', '1h', '4h', '1d'];
 export const SESSION_INTERVAL = 'US1D'; // chart of US regular-session candles (QQQ signal data)
 const DAILY = '1d';
 const DAILY_HISTORY = 500;
-// Intraday closed-candle series kept for strategies (4h default, 5m optional). 1000 bars each (SMA200 warm-up):
-// 1000 x 4h ≈ 166 days, 1000 x 5m ≈ 3.5 days.
-const STRATEGY_BARS = { '5m': 1000, '4h': 1000 };
+// Closed-candle series kept for strategies: only the intervals crypto strategies use (config), 1000 bars each
+// (SMA200 warm-up; 1000 x 4h ≈ 166 days). '1d' uses the daily series. Intervals in CHART_INTERVALS arrive by
+// WebSocket; the others (1m, 3m, 30m, 2h, 6h, 8h, 12h, 3d, 1w, 1M) are polled via REST after each expected close.
+const BAR_KEEP = 1000;
+const POLL_LIMIT = 99; // < 100 -> request weight 1
 
 // v = base asset volume, qv = quote asset volume (USDT turnover: REST index 7, ws field "q")
 export const toCandle = (a) => ({ t: a[0], o: +a[1], h: +a[2], l: +a[3], c: +a[4], v: +a[5], T: a[6], qv: a[7] != null ? +a[7] : null });
@@ -23,12 +25,13 @@ const wsCandle = (k) => ({ t: k.t, o: +k.o, h: +k.h, l: +k.l, c: +k.c, v: +k.v, 
 // (Top 20 ≈ 150 market streams on one connection; Binance allows 1024).
 // TODO(load): strategies only need 4h / 1d klines + ticker + markPrice for every watched symbol; 5m/15m/1h klines and
 // depth could be subscribed for the symbol selected in the UI only (would need runtime SUBSCRIBE / UNSUBSCRIBE).
-export const STRATEGY_STREAM_INTERVALS = ['5m', '4h', '1d'];
+export const STRATEGY_STREAM_INTERVALS = ['4h', '1d'];
 
 export class MarketData extends EventEmitter {
-  constructor(symbols, logger, { getCalendar } = {}) {
+  constructor(symbols, logger, { getCalendar, barIntervals = ['4h'] } = {}) {
     super();
     this.symbols = symbols;
+    this.barIntervals = new Set(barIntervals.filter((i) => i !== DAILY));
     this.log = logger;
     this.getCalendar = getCalendar || (() => DEFAULT_US_CALENDAR);
     const ep = endpoints(false); // market data always from mainnet (public, no key)
@@ -40,7 +43,7 @@ export class MarketData extends EventEmitter {
       this.s[sym] = {
         daily: [], // closed daily candles (QQQ: closed US regular-session candles)
         forming: null, // current (open) daily candle
-        bars: Object.fromEntries(Object.keys(STRATEGY_BARS).map((i) => [i, []])), // closed intraday candles for strategies
+        bars: Object.fromEntries([...this.barIntervals].map((i) => [i, []])), // closed candles for strategies, per interval
         formingBar: {}, // interval -> open candle
         last: null, lastTs: 0,
         ticker: null, mark: null, depth: null,
@@ -143,10 +146,10 @@ export class MarketData extends EventEmitter {
     return st.daily;
   }
 
-  async loadBars(sym) {
+  async loadBars(sym, ivs = [...this.barIntervals]) {
     const st = this.s[sym];
-    for (const [iv, n] of Object.entries(STRATEGY_BARS)) {
-      const rows = (await this.rest.klines(sym, iv, Math.min(1500, n + 1))).map(toCandle);
+    for (const iv of ivs) {
+      const rows = (await this.rest.klines(sym, iv, Math.min(1500, BAR_KEEP + 1))).map(toCandle);
       const now = Date.now();
       st.bars[iv] = rows.filter((c) => c.T < now);
       st.formingBar[iv] = rows.find((c) => c.T >= now) || null;
@@ -199,7 +202,7 @@ export class MarketData extends EventEmitter {
       this.emit('kline', { symbol: d.s, interval, candle: c, closed: d.k.x });
       this.updateChartCache(d.s, interval, c);
       if (st.session && interval === st.session.interval) { st.session.onBar(c); return; }
-      if (!st.session && STRATEGY_BARS[interval]) {
+      if (!st.session && this.barIntervals.has(interval)) {
         if (d.k.x) { this.appendBar(d.s, interval, c); st.formingBar[interval] = null; } else st.formingBar[interval] = c;
         return;
       }
@@ -253,24 +256,58 @@ export class MarketData extends EventEmitter {
     const prev = arr[arr.length - 1];
     if (prev && c.t !== prev.T + 1) this.log.warn(`${sym} ${interval} candle gap: ${new Date(prev.T + 1).toISOString()} → ${new Date(c.t).toISOString()}`, 'DATA_GAP');
     arr.push(c);
-    if (arr.length > STRATEGY_BARS[interval] + 100) arr.splice(0, arr.length - STRATEGY_BARS[interval]);
+    if (arr.length > BAR_KEEP + 100) arr.splice(0, arr.length - BAR_KEEP);
     this.emit('candleClose', { symbol: sym, interval, candle: c });
     return true;
   }
 
   async resyncBars(sym, interval, reason) {
+    const st = this.s[sym];
+    if (!st || st._resync?.[interval]) return;
+    (st._resync ||= {})[interval] = true;
     try {
       // everything after the last stored bar (a long outage must not leave holes in the series)
-      const arr = this.s[sym].bars[interval];
-      const lastT = arr.length ? arr[arr.length - 1].t : Date.now() - 5 * 4 * 3600_000;
-      const rows = (await this.rest.publicGet('/fapi/v1/klines', { symbol: sym, interval, startTime: lastT + 1, limit: 1500 })).map(toCandle);
-      const now = Date.now();
+      const arr = st.bars[interval] || (st.bars[interval] = []);
+      let from = arr.length ? arr[arr.length - 1].t + 1 : Date.now() - 5 * 4 * 3600_000;
       let n = 0;
-      for (const c of rows) if (c.T < now && this.appendBar(sym, interval, c)) n++;
-      if (n) this.log.warn(`${sym} ${n} missed ${interval} close(s) recovered via REST (${reason})`, 'DATA_RESYNC');
+      for (let page = 0; page < 20; page++) {
+        const rows = (await this.rest.publicGet('/fapi/v1/klines', { symbol: sym, interval, startTime: from, limit: POLL_LIMIT })).map(toCandle);
+        const now = Date.now();
+        for (const c of rows) if (c.T < now && this.appendBar(sym, interval, c)) n++;
+        if (rows.length < POLL_LIMIT) break;
+        from = rows[rows.length - 1].t + 1;
+      }
+      if (n && CHART_INTERVALS.includes(interval)) this.log.warn(`${sym} ${n} missed ${interval} close(s) recovered via REST (${reason})`, 'DATA_RESYNC');
     } catch (e) {
       this.log.error(`${sym} ${interval} resync failed: ${e.message}`, 'API_ERROR');
+    } finally {
+      st._resync[interval] = false;
     }
+  }
+
+  // Non-streamed interval: fetch new closed bars ~3 s after the next close is due (1M / unknown length: every 5 min).
+  pollBars(sym, interval, now = Date.now()) {
+    const st = this.s[sym];
+    const last = st.bars[interval]?.at(-1);
+    if (!last) return;
+    const due = interval === '1M' ? (st._pollAt?.[interval] || 0) + 300_000 : last.T + 1 + (last.T + 1 - last.t) + 3000;
+    if (now < due) return;
+    (st._pollAt ||= {})[interval] = now;
+    this.resyncBars(sym, interval, 'poll');
+  }
+
+  // A strategy switched to an interval that is not loaded yet: load its history for every symbol, then keep it.
+  async ensureInterval(interval) {
+    if (interval === DAILY || this.barIntervals.has(interval)) return false;
+    this.barIntervals.add(interval);
+    for (const sym of this.symbols) {
+      const st = this.s[sym];
+      if (st.session || st.unavailable) continue;
+      st.bars[interval] ||= [];
+      try { await this.loadBars(sym, [interval]); } catch (e) { this.log.error(`${sym} ${interval} history load failed: ${e.message}`, 'API_ERROR'); }
+    }
+    this.log.info(`${interval} candles loaded for strategies (${CHART_INTERVALS.includes(interval) ? 'WebSocket' : 'REST poll after each close'})`, 'SCHEDULER');
+    return true;
   }
 
   // If a daily close was missed (ws gap), refetch via REST and emit closes for new candles.
@@ -278,7 +315,7 @@ export class MarketData extends EventEmitter {
     for (const sym of this.symbols) {
       const st = this.s[sym];
       if (st.session) { this.checkSessionClose(sym, reason); continue; }
-      for (const iv of Object.keys(STRATEGY_BARS)) this.resyncBars(sym, iv, reason);
+      for (const iv of this.barIntervals) this.resyncBars(sym, iv, reason);
       const lastT = st.daily.length ? st.daily[st.daily.length - 1].t : 0;
       try {
         const rows = (await this.rest.publicGet('/fapi/v1/klines', { symbol: sym, interval: DAILY, startTime: lastT + 1, limit: 1500 })).map(toCandle);
@@ -303,7 +340,8 @@ export class MarketData extends EventEmitter {
     for (const sym of this.symbols) {
       const st = this.s[sym];
       if (st.session) continue;
-      for (const iv of Object.keys(STRATEGY_BARS)) {
+      for (const iv of this.barIntervals) {
+        if (!CHART_INTERVALS.includes(iv)) { this.pollBars(sym, iv, now); continue; } // no stream: REST after each close
         const fb = st.formingBar[iv];
         if (fb && now > fb.T + 10_000) { st.formingBar[iv] = null; this.resyncBars(sym, iv, 'close event missing'); }
       }

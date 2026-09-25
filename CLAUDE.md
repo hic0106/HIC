@@ -8,7 +8,7 @@
 - 저장소: `hic0106/HIC`, 작업 브랜치: `claude/binance-crypto-trading-terminal-xspxvw` (여기에만 commit/push, PR은 요청 시에만).
 - 스택: Node 22 ESM, Express 5, ws, lightweight-charts v5, @anthropic-ai/sdk 0.128.0. 빌드 단계 없음.
 - 실행: `start.bat`(Windows, npm install 후 서버 실행) 또는 `npm start` → http://localhost:8420 (`PORT` 환경변수로 변경 가능)
-- 테스트: `npm test` (현재 122개 전부 통과). 가짜 서버: `npm run mock`, `npm run dev:mock`(data-mock/ 사용), `npm run mock:claude` + `ANTHROPIC_BASE_URL=http://127.0.0.1:9902`.
+- 테스트: `npm test` (현재 124개 전부 통과). 가짜 서버: `npm run mock`, `npm run dev:mock`(data-mock/ 사용), `npm run mock:claude` + `ANTHROPIC_BASE_URL=http://127.0.0.1:9902`.
 - 자세한 사용법/구조: `README.md`.
 
 ## 사용자 선호
@@ -49,7 +49,7 @@ Stop은 ATR_DYNAMIC(min/max 클램프), LIVE에서는 Binance Algo STOP_MARKET�
 - `server/engine.js`: 전략 평가, 주문 전 검사, PAPER/LIVE 실행, Stop, Funding, PnL.
 - `server/scheduler/strategyScheduler.js`: 캔들 마감 시 평가. `run()`은 단일 큐(`this.queue`)로 직렬화, 실제 작업은 `runNow()`.
 - `server/risk/riskMonitor.js`: 실시간 Stop·청산가·연결 감시.
-- `server/marketData.js`: REST 초기 로드 + WS. 재연결 시 마지막 봉 이후 전부 재조회(`resyncBars`/`resyncDaily`), 비연속 봉이면 DATA_GAP 로그.
+- `server/marketData.js`: REST 초기 로드 + WS. 전략 캔들은 설정에서 쓰는 간격만(`barIntervalsFor`, 1m~1M 전부 선택 가능). CHART_INTERVALS(5m/15m/1h/4h/1d)는 WS, 나머지는 마감 후 REST 폴링(`pollBars`), 설정 변경 시 `ensureInterval`로 즉시 로드. 재연결 시 마지막 봉 이후 전부 재조회(`resyncBars`/`resyncDaily`), 비연속 봉이면 DATA_GAP 로그.
 - `server/controller/`: Self-Improving Controller V1 (OFF/OBSERVE/PAPER_AUTO/LIVE_APPROVAL).
 - `server/portfolio/`: 내 자산 화면. userDataStream(listenKey, `gen` 카운터로 stop 후 소켓 차단), income(최근 3개월, 커서 포함 조회 + tranId 중복 제거).
 - `server/strategyConfig.js`: `validateStrategySettings` (설정 API와 AI 적용이 공용).
