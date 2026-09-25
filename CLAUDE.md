@@ -63,6 +63,7 @@ Stop은 ATR_DYNAMIC(min/max 클램프), LIVE에서는 Binance Algo STOP_MARKET�
   - `applyCandidate()`: 테스트된 변경분만 현재 설정 위에 재적용.
   - `generate()`: AI 전략 생성. 기존 전략은 이름/캔들만 전달. 채택 조건 IS 거래 ≥5, IS>0, OOS>0, score ≥0.3. 저장은 `data/ai-strategies.json`.
 - API: `/api/backtest/run|status|result|candles`, `/api/ai/status|key|analyze|improve|generate|apply|save|delete` (`server/index.js`).
+- 모바일: `public/m.html` + `js/mobile.js` + `css/mobile.css`, 데이터 `/api/mobile`(2초 폴링). 터치 기기는 index.html에서 `/m`으로 이동(`hic.desktop` localStorage로 PC 화면 고정). Fold8 커버 1열 / 펼침 2열 / Flex 모드 분할.
 - 프론트: `public/index.html`(트레이딩 / 내 자산 / 백테스트 탭), `public/js/backtest.js`, `public/js/ai.js`, `public/js/ko.js`.
 
 ## 클라우드 운영 (`deploy/`)

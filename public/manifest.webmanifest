@@ -1,0 +1,10 @@
+{
+  "name": "HIC 선물 자동매매",
+  "short_name": "HIC",
+  "start_url": "/m",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0b0e11",
+  "theme_color": "#0b0e11",
+  "icons": [{ "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }]
+}

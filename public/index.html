@@ -4,6 +4,18 @@
 <meta charset="utf-8">
 <title>HIC Trading Terminal</title>
 <meta name="viewport" content="width=1280">
+<script>
+// touch devices (phones, Galaxy Z Fold cover / main screen, tablets) open the mobile screen unless the PC screen was chosen
+(function () {
+  try {
+    var q = new URLSearchParams(location.search);
+    if (q.get('desktop') === '1') localStorage.setItem('hic.desktop', '1');
+    if (q.get('desktop') === '0') localStorage.removeItem('hic.desktop');
+    var touch = matchMedia('(pointer: coarse)').matches || navigator.maxTouchPoints > 0;
+    if (localStorage.getItem('hic.desktop') !== '1' && touch && Math.min(screen.width, innerWidth) <= 1180) location.replace('/m');
+  } catch (e) { /* storage blocked: stay on the PC screen */ }
+})();
+</script>
 <link rel="stylesheet" href="/css/terminal.css">
 </head>
 <body>

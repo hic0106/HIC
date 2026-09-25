@@ -63,6 +63,13 @@ Testnet을 체크하면 주문이 `demo-fapi.binance.com`으로 전송됩니다(
 - 폰 접속(Tailscale): 서버에서 `bash ~/HIC/deploy/setup-tailscale.sh` → 표시된 로그인 링크로 로그인 → 폰에 Tailscale 앱 설치(같은 계정) → 출력된 `https://<서버>.<tailnet>.ts.net` 열기. 내 Tailscale 기기에서만 접속되고 인터넷에는 열리지 않습니다(Tailscale Serve, Funnel 아님).
 - 서버 재시작/업데이트 후 봇은 항상 **정지 상태**로 시작합니다(안전). 접속해서 START를 누르세요. Binance에 등록된 손절주문은 계속 작동합니다.
 
+## 모바일 화면 (`/m`)
+
+- 폰·태블릿(터치 기기)으로 접속하면 자동으로 `/m`이 열립니다. [PC 화면으로 보기]를 누르면 그 기기에서는 PC 화면 유지(`/?desktop=0`으로 되돌림).
+- 내용: 총 자산(전체 지갑)·오늘 손익·수익률·평가손익·주문 가능, 경고(연결 끊김·청산 위험·손절 1% 이내·포지션 불일치), 봇 시작/정지·전체 청산(PC와 같은 입력 확인), 포지션별 청산, 전략 요약, 최근 거래, 알림.
+- Galaxy Z Fold8: 커버 화면은 1열, 펼친 화면(가로·세로)은 2열, 반 접은 Flex 모드는 위(계좌·버튼)/아래(목록) 분할(Viewport Segments 지원 브라우저). 홈 화면에 추가하면 앱처럼 전체 화면으로 열립니다.
+- 2초마다 `/api/mobile`(요약 데이터)만 받아 데이터 사용량이 적고, 화면이 꺼지면 멈춥니다. 전략 설정·백테스트는 PC 화면에서.
+
 ## 화면 구성
 
 - **상단**: Total Equity / Today's PnL / Total Return(가장 크게), Available, Invested, Total PnL, Long·Short·Net Exposure, Market Data·Binance API·Bot 상태, 마지막 데이터 시각, PAPER/LIVE 배지, START / STOP ALL BOTS / CLOSE ALL POSITIONS.

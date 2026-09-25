@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>HIC 모바일</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b0e11">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="stylesheet" href="/css/mobile.css">
+</head>
+<body>
+<header class="m-top">
+  <div class="m-brand"><b>HIC</b><span id="mMode" class="badge">—</span><span id="mRun" class="badge">—</span></div>
+  <div class="m-conn"><span id="mConnMk" class="dot">시세</span><span id="mConnEx" class="dot">거래소</span><span id="mAge" class="muted"></span></div>
+</header>
+
+<main class="m-main">
+  <!-- pane A: account + controls (top half in flex mode) -->
+  <section class="pane pane-a">
+    <div class="card total">
+      <label id="mTotalLbl">총 자산 <i>USDT</i></label>
+      <div id="mTotal" class="big">—</div>
+      <small id="mTotalSub" class="muted"></small>
+    </div>
+    <div class="kpis">
+      <div class="kpi"><label>오늘 손익</label><div id="mToday">—</div><small id="mTodayPct"></small></div>
+      <div class="kpi"><label>총 수익률</label><div id="mRet">—</div><small id="mBase"></small></div>
+      <div class="kpi"><label>평가손익</label><div id="mUnreal">—</div></div>
+      <div class="kpi"><label>주문 가능 (선물)</label><div id="mAvail">—</div></div>
+    </div>
+    <div id="mWarn"></div>
+    <div class="controls">
+      <button id="bStart" class="btn go">▶ 봇 시작</button>
+      <button id="bStop" class="btn stop">■ 봇 정지</button>
+      <button id="bCloseAll" class="btn danger">전체 청산</button>
+    </div>
+  </section>
+
+  <!-- pane B: details (bottom half in flex mode) -->
+  <section class="pane pane-b">
+    <nav class="tabs" id="mTabs">
+      <button data-t="pos" class="on">포지션 <b id="cPos">0</b></button>
+      <button data-t="strat">전략</button>
+      <button data-t="trades">거래</button>
+      <button data-t="alerts">알림 <b id="cAlert">0</b></button>
+    </nav>
+    <div id="t-pos" class="tab on"></div>
+    <div id="t-strat" class="tab"></div>
+    <div id="t-trades" class="tab"></div>
+    <div id="t-alerts" class="tab"></div>
+    <p class="foot"><a href="/?desktop=1" id="toDesktop">PC 화면으로 보기</a></p>
+  </section>
+</main>
+
+<div id="mModal" class="modal hidden"><div class="m-box" id="mBox"></div></div>
+<div id="mToast" class="m-toast"></div>
+<script type="module" src="/js/mobile.js"></script>
+</body>
+</html>

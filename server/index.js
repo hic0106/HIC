@@ -130,6 +130,27 @@ app.post('/api/config/universe', (req, res) => {
   } catch (e) { ok(res, { ok: false, msg: e.message }); }
 });
 app.get('/api/portfolio', (req, res) => res.json(portfolioPayload()));
+// Compact payload for the mobile screen (/m): account, positions, strategies, recent trades and warnings only
+app.get('/api/mobile', (req, res) => {
+  try {
+    const s = engine.snapshot();
+    const w = portfolio.walletSummary?.() || null;
+    let rk = null; try { rk = risk.status(); } catch { rk = null; }
+    res.json({
+      ts: s.ts, mode: s.mode, runState: s.runState, conn: { market: s.conn.market, exchange: s.conn.exchange, testnet: s.conn.testnet, liveError: s.conn.liveError },
+      account: { ...s.account, bySymbol: undefined, byClass: undefined }, wallets: w,
+      positions: s.positions.map((p) => ({ strategy: p.strategy, symbol: p.symbol, side: p.side, qty: p.qty, entryPrice: p.entryPrice, markPrice: p.markPrice, pnl: p.pnl, pnlPct: p.pnlPct, pricePct: p.pricePct,
+        stopPrice: p.stopPrice, stopDistPct: p.stopDistPct, tpPrice: p.tpPrice, leverage: p.leverage, entryTime: p.entryTime, orderAmount: p.orderAmount, currentValue: p.currentValue, exStop: p.exStop ? { status: p.exStop.status } : null,
+        tick: s.symbols[p.symbol]?.filters?.tickSize ?? null })),
+      pending: s.slots.filter((x) => x.pending).map((x) => ({ strategy: x.strategy, symbol: x.symbol, action: x.pending.action, side: x.pending.side })),
+      strategies: s.strategies.map((x) => ({ strategy: x.strategy, assetClass: x.assetClass, enabled: x.enabled, open: x.open, longs: x.longs, shorts: x.shorts, unrealized: x.unrealized, realized: x.realized, trades: x.trades, winRate: x.winRate })),
+      trades: s.trades.slice(0, 30).map((t) => ({ strategy: t.strategy, symbol: t.symbol, side: t.side, exitTime: t.exitTime, entryPrice: t.entryPrice, exitPrice: t.exitPrice, netPnl: t.netPnl, returnPct: t.returnPct, exitReason: t.exitReason })),
+      risk: rk, reconciliation: (() => { try { const r = portfolio.recon; return { ok: r.ok, warnings: r.warnings }; } catch { return null; } })(),
+      alerts: log.recent(400).filter((e) => e.level === 'ERROR' || e.level === 'WARN' || e.level === 'TRADE').slice(-40).reverse().map((e) => ({ ts: e.ts, level: e.level, code: e.code, msg: e.msg })),
+    });
+  } catch (e) { res.status(500).json({ ok: false, msg: e.message }); }
+});
+app.get('/m', (req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'm.html')));
 app.get('/api/portfolio/equity', (req, res) => {
   const range = ['1D', '7D', '1M', '3M', 'ALL'].includes(req.query.range) ? req.query.range : '1M';
   res.json(portfolio.equitySeries(range));
