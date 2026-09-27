@@ -1064,6 +1064,18 @@ export class Engine {
     }
   }
 
+  // exit line of the last evaluated candle; computed once from the loaded candles when the slot was not evaluated
+  // since start (the scheduler skips candles already acted on)
+  exitLevelOf(slot) {
+    if (slot.exitLevel === undefined) {
+      try {
+        const sig = evaluate(slot.strategy, barsFor(this.md, slot.strategy, slot.symbol, this.cfg), this.cfg.strategies[slot.strategy]);
+        if (sig.ready) slot.exitLevel = sig.exitLevel || null;
+      } catch { /* candles not loaded yet: try again on the next snapshot */ }
+    }
+    return slot.exitLevel;
+  }
+
   // ---------- accounting
   positionsList(mode = this.mode) {
     const ms = this.ms(mode);
@@ -1072,12 +1084,14 @@ export class Engine {
       const mark = this.md.price(p.symbol) ?? p.entryPrice;
       const gross = (mark - p.entryPrice) * p.qty * dirOf(p.side);
       const net = gross - p.entryFee - p.funding;
+      const exitLevel = this.exitLevelOf(s)?.[p.side] ?? null;
       return {
         ...p, markPrice: mark, currentValue: mark * p.qty, grossPnl: gross, pnl: net,
         pnlPct: (net / p.entryNotional) * 100, pricePct: ((mark / p.entryPrice) - 1) * 100 * dirOf(p.side),
         holdingMs: Date.now() - p.entryTime, status: s.status,
         stopDistPct: p.stopPrice ? Math.abs(mark - p.stopPrice) / mark * 100 : null,
-        exitLevel: s.exitLevel?.[p.side] ?? null, // strategy exit line (candle close), from the last evaluated candle
+        exitLevel, // strategy exit line (candle close), from the last evaluated candle
+        exitDistPct: exitLevel ? (mark - exitLevel) / mark * 100 * dirOf(p.side) : null, // < 0: beyond the line, exits at the close
       };
     });
   }

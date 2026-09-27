@@ -523,7 +523,7 @@ const POS_COLS = [
   ['전략', (p) => SHORT[p.strategy] || p.strategy, true], ['종목', (p) => p.symbol, true], ['방향', (p) => SIDE[p.side], true],
   ['진입가', (p) => p.entryPrice], ['현재가(마크)', (p) => p.markPrice], ['주문금액', (p) => p.orderAmount], ['수량', (p) => p.qty],
   ['현재 가치', (p) => p.currentValue], ['순손익', (p) => p.pnl], ['수익률', (p) => p.pnlPct], ['손절가', (p) => p.stopPrice], ['전략 청산선', (p) => p.exitLevel],
-  ['손절까지', (p) => p.stopDistPct], ['펀딩비', (p) => -(p.funding || 0)], ['보유기간', (p) => p.holdingMs], [''],
+  ['손절까지', (p) => p.stopDistPct], ['청산선까지', (p) => p.exitDistPct], ['펀딩비', (p) => -(p.funding || 0)], ['보유기간', (p) => p.holdingMs], [''],
 ];
 S.posSort = { i: -1, dir: 1 };
 S.posFilter = {};
@@ -561,12 +561,12 @@ function renderPositions(s) {
     <td>${fPrice(p.entryPrice, f(p.symbol))}</td><td>${fPrice(p.markPrice, f(p.symbol))}</td>
     <td>${fNum(p.orderAmount, 2)}${p.ctrlMultiplier != null && p.ctrlMultiplier !== 1 ? ` <span class="warn" title="설정금액 ${fNum(p.baseAmount, 2)} × 자동조절 ${p.ctrlMultiplier}">×${p.ctrlMultiplier}</span>` : ''}</td><td>${p.qty}</td><td>${fNum(p.currentValue, 2)}</td>
     <td class="${cls(p.pnl)}">${fSigned(p.pnl)}</td><td class="${cls(p.pnlPct)}">${fPct(p.pnlPct)}</td>
-    <td class="down">${p.stopPrice ? fPrice(p.stopPrice, f(p.symbol)) : '없음'} ${exBadge(p)}</td><td title="직전 마감 캔들 기준 · 캔들 종가가 이 가격을 넘어가면 전략 청산">${p.exitLevel != null ? fPrice(p.exitLevel, f(p.symbol)) : '<span class="muted">지표</span>'}</td><td class="muted">${p.stopDistPct != null ? p.stopDistPct.toFixed(2) + '%' : ''}</td>
+    <td class="down">${p.stopPrice ? fPrice(p.stopPrice, f(p.symbol)) : '없음'} ${exBadge(p)}</td><td title="직전 마감 캔들 기준 · 캔들 종가가 이 가격을 넘어가면 전략 청산">${p.exitLevel != null ? fPrice(p.exitLevel, f(p.symbol)) : '<span class="muted">지표</span>'}</td><td class="muted">${p.stopDistPct != null ? p.stopDistPct.toFixed(2) + '%' : ''}</td><td class="${p.exitDistPct != null && p.exitDistPct < 0 ? 'down' : 'muted'}" title="${p.exitDistPct != null && p.exitDistPct < 0 ? '이미 청산선 밖: 캔들 마감 때 이 상태면 청산' : ''}">${p.exitDistPct != null ? p.exitDistPct.toFixed(2) + '%' : ''}</td>
     <td>${fNum(p.funding ? -p.funding : 0, 4)}</td><td>${fDur(p.holdingMs)}</td>
     <td><button class="btn small danger" data-close="${p.strategy}:${p.symbol}" ${p.status === 'PENDING' || p.status === 'UNKNOWN' ? 'disabled' : ''}>청산</button></td></tr>`).join('');
   const tv = list.reduce((a, p) => a + p.currentValue, 0), tp = list.reduce((a, p) => a + p.pnl, 0), ta = list.reduce((a, p) => a + p.orderAmount, 0);
   pane.querySelector('tbody').innerHTML = rows || `<tr><td class="l muted" colspan="${POS_COLS.length}">필터에 맞는 포지션 없음</td></tr>`;
-  pane.querySelector('tfoot').innerHTML = `<tr><td>합계${list.length < s.positions.length ? ` (${list.length}/${s.positions.length})` : ''}</td><td></td><td></td><td></td><td></td><td>${fNum(ta, 2)}</td><td></td><td>${fNum(tv, 2)}</td><td class="${cls(tp)}">${fSigned(tp)}</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>`;
+  pane.querySelector('tfoot').innerHTML = `<tr><td>합계${list.length < s.positions.length ? ` (${list.length}/${s.positions.length})` : ''}</td><td></td><td></td><td></td><td></td><td>${fNum(ta, 2)}</td><td></td><td>${fNum(tv, 2)}</td><td class="${cls(tp)}">${fSigned(tp)}</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>`;
 }
 
 function exBadge(p) {
