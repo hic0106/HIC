@@ -240,6 +240,12 @@ app.post('/api/config/general', (req, res) => {
       balanceBufferPct: num(b.balanceBufferPct, { min: 0, max: 50 }),
       exchangeStops: !!b.exchangeStops,
       stopWorkingType: ['CONTRACT_PRICE', 'MARK_PRICE'].includes(b.stopWorkingType) ? b.stopWorkingType : g.stopWorkingType,
+      maxAdds: b.maxAdds == null ? g.maxAdds : num(b.maxAdds, { min: 0, max: 5, int: true }),
+      trailing: b.trailingActivateAtr == null ? g.trailing : {
+        enabled: !!b.trailingEnabled,
+        activateAtr: num(b.trailingActivateAtr, { min: 0.5, max: 20 }),
+        trailAtr: num(b.trailingTrailAtr, { min: 0.5, max: 20 }),
+      },
     };
     store.config.general = next;
     store.saveConfig();

@@ -282,6 +282,7 @@ test('live add-on: old Binance stop canceled first, new stop placed for the tota
 
 test('trailing stop: break-even after 1 ATR, then peak - 2 ATR, never loosened, exit reason TRAIL_STOP', async () => {
   const { engine } = newEngine('PAPER');
+  engine.cfg.general.trailing = { enabled: true, activateAtr: 1, trailAtr: 2 };
   await engine.openPosition('ADX', 'ETHUSDT', 'LONG', { atr: 10 });
   const pos = engine.slot('ADX', 'ETHUSDT').position;
   const e = pos.entryPrice, s0 = pos.stopPrice;
@@ -313,6 +314,7 @@ test('trailing stop LIVE: new Binance stop placed first, old one canceled after'
     newAlgoOrder: async (p) => { calls.push(['place', p.clientAlgoId, Number(p.triggerPrice)]); return { algoId: calls.length }; },
     cancelAlgoOrder: async (id) => { calls.push(['cancel', id]); return {}; },
   };
+  engine.cfg.general.trailing = { enabled: true, activateAtr: 1, trailAtr: 2 };
   await engine.openPosition('ADX', 'XRPUSDT', 'LONG', { atr: 5 });
   const pos = engine.slot('ADX', 'XRPUSDT').position;
   pos.exStop.placedAt = 0; // older than the 60 s throttle

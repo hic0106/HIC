@@ -151,7 +151,7 @@ test('historical liquidity: ranking uses only candles closed before each rebalan
 
 test('backtest: trade filter blocks entries, never exits; sizing = capital / tradeTopN', async () => {
   const c = structuredClone(DEFAULT_CONFIG);
-  c.general.includeFunding = false;
+  c.general.includeFunding = false; c.general.maxAdds = 0; c.general.trailing.enabled = false;
   const closes = Array.from({ length: 120 }, (_, i) => 100 + i);
   const mk = () => closes.map((x, i) => ({ t: i * DAY, o: x, h: x * 1.005, l: x * 0.995, c: x, v: 1, qv: 1, T: (i + 1) * DAY - 1 }));
   const data = { AUSDT: mk(), BUSDT: mk(), CUSDT: mk() };

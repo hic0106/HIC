@@ -38,11 +38,11 @@
 | RAYNER (기본 OFF) | 코인 Universe | 4h | EMA50 + MACD(1,50,9) 히스토그램 가속, STRUCTURE 손절(최근 10봉), 히스토그램 목표 익절(진입 시 고정), 추세당 최대 2회 |
 | QQQ_EMA_TREND / QQQ_TSMOM (ON), QQQ_SMA200 / QQQ_TURTLE_50_20 (OFF) | QQQUSDT | 미국 정규장 세션 | 롱/현금만 |
 
-추가 매수: 보유 중 같은 방향 진입 조건이 다시 참이면 캔들당 1회, 포지션당 최대 `general.maxAdds`(기본 3, 0=끔)회 추가. 평균단가 합산, 손절은 추가 체결가 기준 재계산 후 유리한 쪽으로만 이동, LIVE는 기존 Binance Stop 취소 → 총수량으로 재등록. 백테스트는 추가 매수 미반영.
+추가 매수: 보유 중 같은 방향 진입 조건이 다시 참이면 캔들당 1회, 포지션당 최대 `general.maxAdds`(기본 0=끔)회 추가. 평균단가 합산, 손절은 추가 체결가 기준 재계산 후 유리한 쪽으로만 이동, LIVE는 기존 Binance Stop 취소 → 총수량으로 재등록. 백테스트에도 반영.
 
 Stop은 ATR_DYNAMIC(min/max 클램프), LIVE에서는 Binance Algo STOP_MARKET로 등록. Take Profit은 봇이 감시.
 
-트레일링 스탑(`general.trailing`, 기본 켜짐): 진입 ATR 기준, 유리한 방향 1 ATR 도달 시 손절을 본전으로, 이후 최고가 − 2 ATR로 따라감(느슨해지지 않음). 봇 손절은 틱마다, Binance Stop은 최대 1분에 1회 새 Stop 등록 후 기존 취소. 청산 사유 TRAIL_STOP. 백테스트 미반영.
+트레일링 스탑(`general.trailing`, 기본 켜짐 4/6): 진입 ATR 기준, 유리한 방향 activateAtr 도달 시 손절을 본전으로, 이후 최고가 − trailAtr로 따라감(느슨해지지 않음). 1000일 백테스트(2026-09-28)에서 1/2는 세 전략 모두 악화, 4/6은 TREND_RIDER·VOL_BREAKOUT 개선·TSMOM 악화, 추가 매수 3회는 MDD 70%대. 공통 설정 화면에서 변경. 봇 손절은 틱마다, Binance Stop은 최대 1분에 1회 새 Stop 등록 후 기존 취소. 청산 사유 TRAIL_STOP. 백테스트에도 반영(봉 극값으로 올린 뒤 종가가 새 손절 밖이면 그 가격에 청산).
 
 보유 포지션 표: 헤더 더블 클릭 정렬(오름→내림→해제, 한글/영문 localeCompare 'ko'), 전략·종목·방향 텍스트 필터.
 

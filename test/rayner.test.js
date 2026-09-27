@@ -219,7 +219,7 @@ test('config: Rayner defaults + validation', () => {
 
 test('backtest: Rayner uses structure stops, histogram target exits and the per-trend limit', async () => {
   const c = structuredClone(DEFAULT_CONFIG);
-  c.general.includeFunding = false;
+  c.general.includeFunding = false; c.general.maxAdds = 0; c.general.trailing.enabled = false;
   c.strategies.RAYNER.enabled = true;
   // repeated bursts in one uptrend: 3rd+ entries must be skipped
   let closes = [...up];

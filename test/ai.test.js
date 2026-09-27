@@ -76,7 +76,7 @@ test('dsl: validation rejects unknown references and bad values; interpreter tra
   assert.ok(r.trades.length >= 1, `trades ${r.trades.length}`);
   assert.ok(r.trades.every((t) => t.side === 'LONG'));
   // exits only when fast < slow or stop
-  assert.ok(r.trades.every((t) => ['STRATEGY_EXIT', 'ATR_STOP'].includes(t.reason)));
+  assert.ok(r.trades.every((t) => ['STRATEGY_EXIT', 'ATR_STOP', 'TRAIL_STOP'].includes(t.reason)));
 });
 
 test('ai improve: candidates are backtested in/out of sample, verdicts set, nothing applied automatically', async () => {

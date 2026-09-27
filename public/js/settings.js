@@ -145,6 +145,12 @@ function generalCol(g) {
     <div class="fr"><label>봇 정지 중에도 손절</label><span>${sw('stopsActiveWhenStopped', g.stopsActiveWhenStopped, ['작동', '꺼짐'])}</span></div>
     <div class="fr"><label>시세 지연 한도 (초)</label>${numIn('dataStaleSec', g.dataStaleSec, 1, 'min="5"')}</div>
     <div class="fr"><label>잔고 여유분 %</label>${numIn('balanceBufferPct', g.balanceBufferPct, 0.5, 'min="0"')}</div>
+    <div class="set-sec">추가 매수 · 트레일링 스탑 (전 전략)</div>
+    <div class="fr"><label>추가 매수 최대 횟수 (0 = 끔)</label>${numIn('maxAdds', g.maxAdds ?? 0, 1, 'min="0" max="5"')}</div>
+    <div class="fr"><label>트레일링 스탑</label><span>${sw('trailingEnabled', !!g.trailing?.enabled)}</span></div>
+    <div class="fr" data-dep="trailingEnabled"><label>시작: 수익 ATR 배수</label>${numIn('trailingActivateAtr', g.trailing?.activateAtr ?? 4, 0.5, 'min="0.5"')}</div>
+    <div class="fr" data-dep="trailingEnabled"><label>간격: 최고가 − ATR 배수</label>${numIn('trailingTrailAtr', g.trailing?.trailAtr ?? 6, 0.5, 'min="0.5"')}</div>
+    <div class="note">트레일링: 진입 ATR 기준, 시작 배수만큼 수익이면 손절을 본전으로 올리고 이후 최고가 − 간격을 따라감. 백테스트에도 반영.</div>
     <div class="set-actions"><span class="dirty">● 저장 안 됨</span><button class="btn ghost small" data-act="resetPaper">모의계좌 초기화</button><button class="btn ghost small" data-act="revert">되돌리기</button><button class="btn primary" data-act="save">공통 설정 저장</button></div>
   </div>`;
 }

@@ -10,6 +10,11 @@
 //   - funding: position value × historical funding rate at each funding time held (paid when > 0 for longs)
 //   - Rayner: structure stop from the signal candle (entry skipped if it is not beyond the fill), histogram target
 //     fixed at entry (RAYNER_HIST_TP), at most maxEntriesPerTrend entries per side until a close across the EMA
+//   - add-on entries (general.maxAdds): entry condition again while holding -> add one slot allocation at the next open
+//     (average entry, stop recomputed from the add-on fill and only tightened), at most maxAdds per position
+//   - trailing stop (general.trailing): after activateAtr x ATR(entry) in favour the stop follows the best price at
+//     trailAtr x ATR, never below break-even. Per bar: stop checked first with the stop from earlier bars, then the bar's
+//     favourable extreme ratchets the stop; a close beyond that new stop exits at the stop (the extreme came before the close)
 //   - dynamic crypto universe (optional tradeFilter(symbol, signalTime)): new entries only when the symbol was in the
 //     historical trade set at the signal time; exits / stops are never filtered
 // Sizing: each strategy has its own account (capital). Each slot gets equity / nSlots at entry (compound) or
@@ -31,6 +36,8 @@ export async function backtestStrategy({ strategy, config, data, funding = {}, s
   const W = LIVE_WINDOW[tf] ?? 1000;
   const fee = g.takerFeePct / 100, slip = g.slippagePct / 100;
   const useFunding = !!g.includeFunding;
+  const maxAdds = g.maxAdds ?? 0;
+  const trail = g.trailing?.enabled ? g.trailing : null;
   const meta = custom ? custom.meta : META[strategy];
   const n = Math.max(1, Math.min(symbols.length, slots > 0 ? slots : symbols.length));
   const capSlots = n < symbols.length; // more watched symbols than slots: limit concurrent positions
@@ -38,7 +45,7 @@ export async function backtestStrategy({ strategy, config, data, funding = {}, s
   let cash = capital; // realized equity
   const trades = [], equity = [], notes = [];
   const pos = {}, pending = {}, block = {}, lastPx = {}, fIdx = {}, trendEntries = {};
-  const stats = { fees: 0, funding: 0, signalsSkipped: 0, notReady: {}, universeSkipped: 0, slotsFull: 0, stopInvalid: 0, trendMax: 0 };
+  const stats = { adds: 0, fees: 0, funding: 0, signalsSkipped: 0, notReady: {}, universeSkipped: 0, slotsFull: 0, stopInvalid: 0, trendMax: 0 };
   for (const s of symbols) { block[s] = { LONG: false, SHORT: false }; pending[s] = []; fIdx[s] = 0; trendEntries[s] = { LONG: [], SHORT: [] }; }
 
   // timeline: open times of bars inside [start, end] across this strategy's symbols
@@ -85,10 +92,42 @@ export async function backtestStrategy({ strategy, config, data, funding = {}, s
     const entryFee = alloc * fee;
     stats.fees += entryFee;
     cash -= entryFee;
-    pos[s] = { side, entry: px, qty, notional: alloc, time, entryFee, fundingAcc: 0,
+    pos[s] = { side, entry: px, qty, notional: alloc, time, entryFee, fundingAcc: 0, atr: o.atr ?? null, adds: 0, peak: px, trailing: false,
       stop: es.stopPrice, stopPct: es.distPct, stopMode: scfg.stop.mode, histTarget: o.histTarget ?? null,
       tp: scfg.takeProfit?.enabled ? px * (1 + dirOf(side) * scfg.takeProfit.pct / 100) : null };
     if (meta.trendEntries) recordTrendEntry(trendEntries[s], side, o.signalCandle);
+  };
+
+  const addTo = (s, o, rawPx) => {
+    const p = pos[s];
+    const px = rawPx * (1 + dirOf(p.side) * slip);
+    const alloc = (compound ? Math.max(0, equityNow()) : capital) / n;
+    if (!(alloc > 0)) return;
+    const qty = alloc / px;
+    const entryFee = alloc * fee;
+    stats.fees += entryFee;
+    cash -= entryFee;
+    stats.adds++;
+    p.entry = (p.entry * p.qty + px * qty) / (p.qty + qty);
+    p.qty += qty;
+    p.notional += alloc;
+    p.entryFee += entryFee;
+    p.adds++;
+    const es = entryStop(scfg.stop, { atr: o.atr, structStop: { [p.side]: o.structStop } }, p.side, px);
+    if (es.stopPrice != null && !es.invalid && p.stop != null && dirOf(p.side) * (es.stopPrice - p.stop) > 0) p.stop = es.stopPrice;
+    if (meta.trendEntries) recordTrendEntry(trendEntries[s], p.side, o.signalCandle);
+  };
+  // ratchet the trailing stop with a new best price; returns true when it moved
+  const trailTo = (p, best) => {
+    if (!trail || !(p.atr > 0) || p.stop == null) return false;
+    const d = dirOf(p.side);
+    p.peak = d > 0 ? Math.max(p.peak, best) : Math.min(p.peak, best);
+    if ((p.peak - p.entry) * d < trail.activateAtr * p.atr) return false;
+    const ns = d > 0 ? Math.max(p.entry, p.peak - trail.trailAtr * p.atr) : Math.min(p.entry, p.peak + trail.trailAtr * p.atr);
+    if ((ns - p.stop) * d <= 0) return false;
+    p.stop = ns;
+    p.trailing = true;
+    return true;
   };
 
   let step = 0;
@@ -102,7 +141,8 @@ export async function backtestStrategy({ strategy, config, data, funding = {}, s
       // 1) orders decided at the previous close fill at this open
       for (const o of pending[s]) {
         if (o.type === 'EXIT' && pos[s]) { const tr = close(s, b.o, b.t, o.reason || 'STRATEGY_EXIT'); tr.signalTime = o.signalTime; }
-        if (o.type === 'ENTRY' && !pos[s]) { open(s, o, b.o, b.t); if (pos[s]) pos[s].signalTime = o.signalTime; }
+        if (o.type === 'ENTRY' && o.add && pos[s]?.side === o.side) addTo(s, o, b.o);
+        else if (o.type === 'ENTRY' && !o.add && !pos[s]) { open(s, o, b.o, b.t); if (pos[s]) pos[s].signalTime = o.signalTime; }
       }
       pending[s] = [];
       // 2) intrabar emergency stop / take profit
@@ -113,9 +153,11 @@ export async function backtestStrategy({ strategy, config, data, funding = {}, s
         const hi = p.side === 'LONG' ? b.h : b.l; // favorable extreme
         if (p.stop != null && (lo - p.stop) * d <= 0) {
           const fill = (b.o - p.stop) * d <= 0 ? b.o : p.stop; // gap through stop -> open
-          close(s, fill, b.t, stopReasonOf(p.stopMode));
+          close(s, fill, b.t, p.trailing ? 'TRAIL_STOP' : stopReasonOf(p.stopMode));
         } else if (p.tp != null && (hi - p.tp) * d >= 0) {
           close(s, (b.o - p.tp) * d >= 0 ? b.o : p.tp, b.t, 'TAKE_PROFIT');
+        } else if (trailTo(p, hi) && (b.c - p.stop) * d <= 0) {
+          close(s, p.stop, b.t, 'TRAIL_STOP');
         }
       }
       // 3) funding settlements inside this bar
@@ -136,7 +178,16 @@ export async function backtestStrategy({ strategy, config, data, funding = {}, s
       if (!sig.ready) { stats.notReady[s] = (stats.notReady[s] || 0) + 1; continue; }
       if (pos[s]) {
         const ex = exitFor(strategy, sig, pos[s]);
-        if (!ex.exit) continue;
+        if (!ex.exit) {
+          // add-on entry: same-side condition again while holding (same gates as a new entry, as in the live engine)
+          const p = pos[s];
+          const again = p.side === 'LONG' ? sig.longCond : sig.shortCond && scfg.shortEnabled;
+          const trendFull = meta.trendEntries && trendCounts(sig, trendEntries[s])[p.side] >= scfg.params.maxEntriesPerTrend;
+          if (again && !trendFull && p.adds < maxAdds && (!tradeFilter || tradeFilter(s, b.T + 1))) {
+            pending[s].push({ type: 'ENTRY', add: true, side: p.side, atr: sig.atr, structStop: sig.structStop?.[p.side] ?? null, signalCandle: sig.candleTime, signalTime: b.T + 1 });
+          }
+          continue;
+        }
         pending[s].push({ type: 'EXIT', reason: ex.reason, signalTime: b.T + 1 });
       }
       if (!sig.longCond) block[s].LONG = false;
@@ -166,6 +217,8 @@ export async function backtestStrategy({ strategy, config, data, funding = {}, s
   if (stats.universeSkipped) notes.push(`${stats.universeSkipped} entry signal(s) skipped: symbol outside the historical trade universe at signal time`);
   if (stats.slotsFull) notes.push(`${stats.slotsFull} entry signal(s) skipped: all ${n} slots in use`);
   if (stats.stopInvalid) notes.push(`${stats.stopInvalid} entry signal(s) cancelled: structure stop not beyond the fill price`);
+  if (stats.adds) notes.push(`${stats.adds} add-on entr${stats.adds === 1 ? 'y' : 'ies'} (max ${maxAdds} per position)`);
+  if (trail) notes.push(`trailing stop: break-even after ${trail.activateAtr} ATR, then best price - ${trail.trailAtr} ATR`);
   if (stats.trendMax) notes.push(`${stats.trendMax} entry signal(s) skipped: max entries per trend reached`);
   for (const [s, c] of Object.entries(stats.notReady)) {
     const total = timeline.filter((t) => idx[s].has(t)).length;
@@ -175,7 +228,7 @@ export async function backtestStrategy({ strategy, config, data, funding = {}, s
   return {
     strategy, timeframe: tf, symbols, capital, compound, enabled: !!scfg.enabled, params: scfg.params, stop: scfg.stop, takeProfit: scfg.takeProfit, shortEnabled: !!(scfg.shortEnabled && meta.supportsShort),
     metrics, equity, benchmark: bh, trades, openPositions, fees: stats.fees, funding: -stats.funding, notes, slots: n,
-    skipped: { universe: stats.universeSkipped, slotsFull: stats.slotsFull, stopInvalid: stats.stopInvalid, trendMax: stats.trendMax, rearm: stats.signalsSkipped },
+    adds: stats.adds, skipped: { universe: stats.universeSkipped, slotsFull: stats.slotsFull, stopInvalid: stats.stopInvalid, trendMax: stats.trendMax, rearm: stats.signalsSkipped },
   };
 }
 

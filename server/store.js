@@ -21,8 +21,8 @@ export const DEFAULT_CONFIG = {
     takerFeePct: 0.05,
     makerFeePct: 0.02,
     slippagePct: 0.05,
-    trailing: { enabled: true, activateAtr: 1, trailAtr: 2 }, // profit protection: see engine.trailStop
-    maxAdds: 3, // add-on entries per position when the entry signal fires again while holding (0 = off)
+    trailing: { enabled: true, activateAtr: 4, trailAtr: 6 }, // profit protection: see engine.trailStop (1000-day backtest: 1/2 ATR too tight)
+    maxAdds: 0, // add-on entries per position when the entry signal fires again while holding (0 = off)
     includeFunding: true,
     paperInitialBalance: 10000,
     stopsActiveWhenStopped: true, // Emergency stops keep protecting positions after STOP ALL BOTS

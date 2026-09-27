@@ -13,7 +13,7 @@ const { evaluateStrategy } = await import('../server/strategyRegistry.js');
 
 const H4 = 4 * 3600_000, DAY = 86_400_000;
 const mk = (closes, len, t0 = 0, spread = 0.005) => closes.map((c, i) => ({ t: t0 + i * len, o: c, h: c * (1 + spread), l: c * (1 - spread), c, v: 1, T: t0 + (i + 1) * len - 1 }));
-const cfg = () => { const c = structuredClone(DEFAULT_CONFIG); c.general.includeFunding = false; return c; };
+const cfg = () => { const c = structuredClone(DEFAULT_CONFIG); c.general.includeFunding = false; c.general.maxAdds = 0; c.general.trailing.enabled = false; return c; }; // base mechanics; add-ons / trailing tested separately
 
 test('backtest: Turtle 4h — signal on close, fill at next open, stop fixed at entry, fees + slippage', async () => {
   const c = cfg();
@@ -52,6 +52,31 @@ test('backtest: intrabar emergency stop and gap-through fills', async () => {
   const r2 = await backtestStrategy({ strategy: 'TSMOM', config: c, data: { BTCUSDT: bars2 }, start: 79 * DAY, end: 82 * DAY, capital: 1_000_000, symbols: ['BTCUSDT'] });
   const t2 = r2.trades.find((x) => x.reason === 'FIXED_STOP');
   assert.ok(Math.abs(t2.exitPrice - 120 * (1 - 0.0005)) < 1e-6);
+});
+
+test('backtest: add-on entries while the entry condition stays true, capped by general.maxAdds', async () => {
+  const c = cfg();
+  c.general.maxAdds = 2;
+  const bars = mk(Array.from({ length: 90 }, (_, i) => 100 + i), DAY);
+  const r = await backtestStrategy({ strategy: 'TSMOM', config: c, data: { BTCUSDT: bars }, start: 79 * DAY, end: 90 * DAY, capital: 1_000_000, symbols: ['BTCUSDT'] });
+  assert.equal(r.adds, 2);
+  const p = r.openPositions[0];
+  assert.ok(p.notional > 2.9e6 && p.notional < 3.1e6, 'three slot allocations');
+  assert.ok(p.entryPrice > bars[80].o && p.entryPrice < bars[82].o * 1.001, 'average entry');
+});
+
+test('backtest: trailing stop ratchets on the bar extreme; close beyond the new stop exits at it (TRAIL_STOP)', async () => {
+  const c = cfg();
+  c.general.trailing = { enabled: true, activateAtr: 1, trailAtr: 2 };
+  const bars = mk(Array.from({ length: 80 }, (_, i) => 100 + i), DAY);
+  const atr = evaluateStrategy('TSMOM', bars.slice(0, 80), c.strategies.TSMOM).atr;
+  bars.push({ t: 80 * DAY, o: 180, h: 181, l: 179, c: 180, v: 1, T: 81 * DAY - 1 }); // entry at the open
+  bars.push({ t: 81 * DAY, o: 180, h: 200, l: 179, c: 185, v: 1, T: 82 * DAY - 1 }); // spike to 200, close back below 200 - 2 ATR
+  const r = await backtestStrategy({ strategy: 'TSMOM', config: c, data: { BTCUSDT: bars }, start: 79 * DAY, end: 82 * DAY, capital: 1_000_000, symbols: ['BTCUSDT'] });
+  const t = r.trades.find((x) => x.reason === 'TRAIL_STOP');
+  assert.ok(t, 'trailing stop exit');
+  assert.ok(Math.abs(t.exitPrice - (200 - 2 * atr) * (1 - 0.0005)) < 1e-6);
+  assert.ok(t.gross > 0, 'profit kept');
 });
 
 test('backtest: compound vs fixed sizing, equity accounting consistent', async () => {
