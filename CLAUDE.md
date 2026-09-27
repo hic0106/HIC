@@ -8,7 +8,7 @@
 - 저장소: `hic0106/HIC`, 작업 브랜치: `claude/binance-crypto-trading-terminal-xspxvw` (여기에만 commit/push, PR은 요청 시에만).
 - 스택: Node 22 ESM, Express 5, ws, lightweight-charts v5, @anthropic-ai/sdk 0.128.0. 빌드 단계 없음.
 - 실행: `start.bat`(Windows, npm install 후 서버 실행) 또는 `npm start` → http://localhost:8420 (`PORT` 환경변수로 변경 가능)
-- 테스트: `npm test` (현재 126개 전부 통과). 가짜 서버: `npm run mock`, `npm run dev:mock`(data-mock/ 사용), `npm run mock:claude` + `ANTHROPIC_BASE_URL=http://127.0.0.1:9902`.
+- 테스트: `npm test` (현재 144개 전부 통과). 가짜 서버: `npm run mock`, `npm run dev:mock`(data-mock/ 사용), `npm run mock:claude` + `ANTHROPIC_BASE_URL=http://127.0.0.1:9902`.
 - 자세한 사용법/구조: `README.md`.
 
 ## 사용자 선호
@@ -75,6 +75,8 @@ Stop은 ATR_DYNAMIC(min/max 클램프), LIVE에서는 Binance Algo STOP_MARKET�
 ## 클라우드 운영 (`deploy/`)
 
 - AWS Lightsail 서울/도쿄 Ubuntu + 고정 IP 권장(미국 리전은 Binance 451 차단). `setup-ubuntu.sh`(Node 22, swap, NTP, systemd `hic`), `update.sh`, Windows `connect.bat`(SSH 터널 로컬 8421 → 서버 127.0.0.1:8420), `upload-data.bat`(data 복사). 8420은 외부 공개 금지(인증 없음). 폰: `setup-tailscale.sh`(Tailscale Serve → 127.0.0.1:8420, tailnet 전용, Funnel 금지). WS origin 허용 목록 `HIC_ALLOWED_ORIGINS`(systemd drop-in).
+- 실제 운영(2026-09-28): 서버 15.164.158.220 (`ubuntu@`, 키 `%USERPROFILE%\.ssh\LightsailDefaultKey-ap-northeast-2.pem`, 설정 `%USERPROFILE%\.hic-cloud.cmd`), `~/HIC`. 바탕화면 "HIC Cloud" = connect.bat(터널 8421), "HIC Terminal" = 로컬 start.bat(이 PC 서버, LIVE 금지). 폰: Tailscale 설정 완료, https://ip-172-26-1-192.taila35852.ts.net/m (사용자 iPhone 같은 tailnet).
+- 배포 절차: 사용자가 봇 정지 → `curl http://127.0.0.1:8421/api/mobile`로 runState STOPPED 확인 → push → `ssh ... 'bash ~/HIC/deploy/update.sh'` → 사용자가 봇 재시작. 설정 변경 API는 `X-HIC: 1` 헤더 필요(CSRF 가드). 이 PC는 git user 미설정 → `git -c user.name=Claude -c user.email=noreply@anthropic.com commit`.
 
 ## data/ 폴더 (gitignore, PC 이전 시 복사)
 
@@ -92,7 +94,21 @@ config.json, state.json, secrets.json, portfolio-history.json, backtest-last.jso
 - PC가 꺼지면 Binance에 등록된 Stop 외 기능은 동작하지 않음.
 - 클라우드 개발 환경에서는 Binance/업비트 API가 차단되어 가짜 서버로만 검증함. 실제 API 검증은 로컬에서 필요.
 
+## 진행 상황 (2026-09-28 기준, 다음 세션은 여기서 이어서)
+
+- 서버 = 88a307a (최신), LIVE, 계좌 약 171 USDT. 서버 설정: 추가 매수 3회(사용자 설정, 권장은 0 — 백테스트 MDD 70%대), 트레일링 4/6 ATR, TSMOM lookback 60·상위 10, VOL_BREAKOUT 상위 5(BTC/ETH 포함), TREND_RIDER·TURTLE·ADX 상위 2. TURTLE·ADX 주문금액 10 USDT → BTC 최소수량 미달(BELOW_MIN_QTY), 25 USDT 이상 필요.
+- 08:41 사용자가 전체 청산 후 재시작 → 포지션 0. 재진입 대기(REARM)로 TSMOM 등은 조건 리셋까지 진입 안 함(설계대로). 사용자 결정 대기: 그대로 / TURTLE·ADX 금액 상향 / "재진입 대기 해제" 버튼 추가.
+- 제안만 한 것(결정 대기): 수익 반납 한도 규칙(최대 수익의 X%까지만 반납) 백테스트, 전략별 트레일링/추가매수 설정(현재 전 전략 공통 — TSMOM은 트레일링에 불리), TREND_RIDER 익절 60%(1000일 백테스트에서만 개선).
+- 참고 결과(1000일, 서버 설정): 트레일링 1/2는 세 전략 모두 악화, 4/6은 TREND_RIDER·VOL_BREAKOUT 개선·TSMOM 악화. 청산을 빠르게(trailMult↓) 하면 대체로 악화. TSMOM lookback은 45 부근이 안정적(상위 2 기준 분석, 상위 10에선 미검증).
+- QNT 2026-09-28 급등(178→360): VOL_BREAKOUT 291(+64%), TREND_RIDER 321(+80%) 트레일링 청산. EXTERNAL_CLOSE 177 기록은 앱 청산 정리분(서버 재시작으로 실제 체결가 169 대신 현재가 기록).
+
 ## 최근 커밋
+
+- 88a307a 청산선 즉시 계산 + 청산선까지 %
+- 58ad454 전략 청산선 표시(exitLevel)
+- 135e69e 백테스트 추가매수·트레일링 반영, 권장 기본값, 공통 설정 UI
+- 6fa2ac6 트레일링 스탑, 포지션 표 정렬/필터
+- ce6e812 추가 매수, 외부 청산(-2022) 처리, AI 판정 NO_OOS
 
 - 10af0b7 Ignore dist/
 - 77eb5e9 리뷰 수정: 평가 직렬화, 논블로킹 백테스트, 데이터 공백, AI 적용/정보 누출
