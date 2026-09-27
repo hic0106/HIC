@@ -20,7 +20,8 @@ const bars = (n, last) => Array.from({ length: n }, (_, i) => {
   const o = i ? 100 * 1.0005 ** (i - 1) : c;
   return { t: T0 + i * H, o, h: Math.max(o, c) * 1.001, l: Math.min(o, c) * 0.999, c, v: 1, T: T0 + (i + 1) * H - 1 };
 });
-const cfg = () => ({ ...structuredClone(DEFAULT_CONFIG.strategies.VOL_BREAKOUT), shortEnabled: true });
+// volume filter off here (synthetic candles have constant volume); tested separately below
+const cfg = () => { const c = structuredClone(DEFAULT_CONFIG.strategies.VOL_BREAKOUT); return { ...c, shortEnabled: true, params: { ...c.params, volMult: 0 } }; };
 
 test('Vol Breakout: long only on the candle that crosses day open + k x ATR, with the trend', () => {
   const base = bars(300);
@@ -84,4 +85,15 @@ test('Vol Breakout: stricter short side (own k, EMA falling, own holding time)',
   const hold = (side) => exitFor('VOL_BREAKOUT', { ...s0, shortExit: false, longExit: false }, { side, entryTime: s0.candleTime + s0.barMs - 12 * H }).reason;
   assert.equal(hold('SHORT'), 'TIME_EXIT');
   assert.equal(hold('LONG'), 'STRATEGY_EXIT');
+});
+
+test('Vol Breakout: volume confirmation (breakout candle volume > volMult x prior mean)', () => {
+  const b = bars(300);
+  const c = { ...cfg(), params: { ...cfg().params, volMult: 2, volPeriod: 20 } };
+  const lvl = evaluate('VOL_BREAKOUT', b, c).view.upper;
+  const withVol = (v) => { const x = bars(300, lvl * 1.01); x[299] = { ...x[299], v }; return evaluate('VOL_BREAKOUT', x, c); };
+  assert.equal(withVol(1.5).longCond, false, '1.5x < 2x');
+  assert.equal(withVol(2.5).longCond, true);
+  assert.equal(withVol(2.5).view.volRatio, 2.5);
+  assert.equal(evaluate('VOL_BREAKOUT', bars(300, lvl * 1.01), { ...c, params: { ...c.params, volMult: 0 } }).longCond, true, 'volMult 0 = off');
 });

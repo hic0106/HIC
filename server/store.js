@@ -97,11 +97,13 @@ export const DEFAULT_CONFIG = {
     },
     // Short-term (단타) Vol Breakout on ALTS (BTC/ETH excluded, top 5 alts by quote volume). Walk-forward 2024-09~2026-09
     // (1h, k3, hold 24 bars, strict short k5 / 12 bars / EMA falling vs 72 bars): +222%, MDD 17%, IS/OOS Sharpe 2.09/2.47;
-    // 2x fees +172% (1.82/2.11). Alt list = today's top 20 -> survivorship bias remains. Off by default (PAPER first).
+    // 2x fees +172% (1.82/2.11). Volume confirmation (breakout candle volume > 2 x mean of the prior 20) halves the MDD
+    // (17% -> 9%) with higher Sharpe IS/OOS 2.01/2.66 (2x fees 1.79/2.42) at a lower raw return (+137%).
+    // Alt list = today's top 20 -> survivorship bias remains. Off by default (PAPER first).
     VOL_BREAKOUT: {
       enabled: false, timeframe: '1h', shortEnabled: true, leverage: 1, amounts: amounts(100, 100),
       universe: { topN: 5, excludeMajors: true }, // alts only: BTC/ETH excluded, top 5 alts by 24h quote volume
-      params: { k: 3, levelAtr: 14, trailPeriod: 8, trailMult: 3, maxHoldBars: 24, trendPeriod: 200, shortK: 5, shortHoldBars: 12, shortSlopeBars: 72 },
+      params: { k: 3, levelAtr: 14, trailPeriod: 8, trailMult: 3, maxHoldBars: 24, trendPeriod: 200, shortK: 5, shortHoldBars: 12, shortSlopeBars: 72, volMult: 2, volPeriod: 20 },
       stop: { mode: 'ATR_DYNAMIC', atrPeriod: 14, atrMult: 2, minPct: 1, maxPct: 6, fixedPct: 3 },
       takeProfit: { enabled: false, pct: 5 },
     },

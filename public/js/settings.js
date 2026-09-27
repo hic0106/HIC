@@ -14,7 +14,8 @@ const PARAMS = {
   TSMOM: [['lookback', '모멘텀 기간 (일)', 1]],
   VOL_BREAKOUT: [['k', '돌파 배수 k (ATR)', 0.5], ['levelAtr', '돌파 ATR 기간 (봉)', 1], ['trendPeriod', '추세 EMA 기간 (0 = 끔)', 1],
     ['trailPeriod', '추적 청산 기간 (봉)', 1], ['trailMult', '추적 ATR 배수', 0.5], ['maxHoldBars', '최대 보유 (봉)', 1],
-    ['shortK', '숏 돌파 배수 k', 0.5], ['shortHoldBars', '숏 최대 보유 (봉)', 1], ['shortSlopeBars', '숏: EMA 하락 비교 (봉 전, 0 = 끔)', 1]],
+    ['shortK', '숏 돌파 배수 k', 0.5], ['shortHoldBars', '숏 최대 보유 (봉)', 1], ['shortSlopeBars', '숏: EMA 하락 비교 (봉 전, 0 = 끔)', 1],
+    ['volMult', '거래량 확인 배수 (0 = 끔)', 0.5], ['volPeriod', '거래량 평균 기간 (봉)', 1]],
   TREND_RIDER: [['entryPeriod', '돌파 기간 (봉)', 1], ['trailPeriod', '추적 청산 기간 (봉)', 1], ['trailMult', '추적 ATR 배수', 0.5], ['smaFilter', '추세 SMA 기간', 1]],
   RAYNER: [['emaPeriod', 'EMA 기간', 1], ['fastPeriod', 'MACD Fast', 1], ['slowPeriod', 'MACD Slow', 1], ['signalPeriod', 'MACD Signal', 1],
     ['slopeLookback', 'EMA 기울기 비교 (봉 전)', 1], ['momentumLookback', '히스토그램 비교 봉 수', 1], ['momentumMultiplier', '모멘텀 배수', 0.1],
@@ -116,7 +117,7 @@ function stratCol(name, c, mode, supportsShort) {
     <div class="fr"><label>익절 사용</label><span>${sw('tp.enabled', c.takeProfit.enabled)}</span></div>
     <div class="fr" data-dep="tp.enabled"><label>익절 %</label>${numIn('tp.pct', c.takeProfit.pct, 1, 'min="0.1"')}</div>
     <div class="note">${name === 'VOL_BREAKOUT'
-      ? '롱: 종가가 당일(UTC 00시) 시가 + k×ATR을 이번 봉에서 새로 돌파하고 추세 EMA 위일 때. 숏은 더 엄격: 시가 − 숏 k×ATR 돌파 + EMA 아래 + EMA가 N봉 전보다 낮을 때만, 숏 최대 보유 별도. 청산: 추적선(최근 N봉 최고가 − ATR×배수) 이탈 또는 최대 보유 봉 수 도달(시간 청산). 손절 = 진입 시 ATR 비상 손절. 알트 전용(BTC·ETH 제외, 거래대금 상위 5개) · 1시간봉 · k3 · 24봉 · 엄격한 숏이 2년 워크포워드와 수수료 2배 테스트를 통과한 설정입니다(오늘 기준 상위 20개 목록이라 종목 선택 편향 있음).'
+      ? '롱: 종가가 당일(UTC 00시) 시가 + k×ATR을 이번 봉에서 새로 돌파하고 추세 EMA 위일 때. 숏은 더 엄격: 시가 − 숏 k×ATR 돌파 + EMA 아래 + EMA가 N봉 전보다 낮을 때만, 숏 최대 보유 별도. 거래량 확인: 돌파 봉 거래량이 직전 N봉 평균의 배수를 넘을 때만 진입(기본 2배 — 최대낙폭 17% → 9%, 수익률은 낮아짐). 청산: 추적선(최근 N봉 최고가 − ATR×배수) 이탈 또는 최대 보유 봉 수 도달(시간 청산). 손절 = 진입 시 ATR 비상 손절. 알트 전용(BTC·ETH 제외, 거래대금 상위 5개) · 1시간봉 · k3 · 24봉 · 엄격한 숏이 2년 워크포워드와 수수료 2배 테스트를 통과한 설정입니다(오늘 기준 상위 20개 목록이라 종목 선택 편향 있음).'
       : name === 'TREND_RIDER'
       ? '롱: 종가가 직전 N봉 최고가 돌파 + SMA 위. 숏: 직전 N봉 최저가 이탈 + SMA 아래. 청산(샹들리에): 종가 < 최근 추적 기간 최고가 − ATR×배수 (숏은 최저가 + ATR×배수). 수익이 날수록 청산선이 따라 올라가 추세를 끝까지 탑니다. 손절 = 진입 시 ATR 비상 손절.'
       : name === 'RAYNER'

@@ -45,7 +45,8 @@ export function validateStrategySettings(name, b, cur) {
   if (name === 'ADX') next.params = { adxPeriod: num(b.params.adxPeriod, P), threshold: num(b.params.threshold, { min: 1, max: 100 }), smaFilter: num(b.params.smaFilter, P) };
   if (name === 'TSMOM') next.params = { lookback: num(b.params.lookback, P) };
   if (name === 'VOL_BREAKOUT') next.params = { k: num(b.params.k, { min: 0.1, max: 10 }), levelAtr: num(b.params.levelAtr, P), trailPeriod: num(b.params.trailPeriod, P), trailMult: num(b.params.trailMult, { min: 0.5, max: 10 }), maxHoldBars: num(b.params.maxHoldBars, { min: 1, max: 1000, int: true }), trendPeriod: num(b.params.trendPeriod, { min: 0, max: 1000, int: true }),
-    shortK: num(b.params.shortK ?? b.params.k, { min: 0.1, max: 10 }), shortHoldBars: num(b.params.shortHoldBars ?? b.params.maxHoldBars, { min: 1, max: 1000, int: true }), shortSlopeBars: num(b.params.shortSlopeBars ?? 0, { min: 0, max: 1000, int: true }) };
+    shortK: num(b.params.shortK ?? b.params.k, { min: 0.1, max: 10 }), shortHoldBars: num(b.params.shortHoldBars ?? b.params.maxHoldBars, { min: 1, max: 1000, int: true }), shortSlopeBars: num(b.params.shortSlopeBars ?? 0, { min: 0, max: 1000, int: true }),
+    volMult: num(b.params.volMult ?? 0, { min: 0, max: 20 }), volPeriod: num(b.params.volPeriod ?? 20, { min: 2, max: 500, int: true }) };
   if (name === 'TREND_RIDER') next.params = { entryPeriod: num(b.params.entryPeriod, P), trailPeriod: num(b.params.trailPeriod, P), trailMult: num(b.params.trailMult, { min: 0.5, max: 10 }), smaFilter: num(b.params.smaFilter, P) };
   if (name === 'RAYNER') {
     const q = b.params;

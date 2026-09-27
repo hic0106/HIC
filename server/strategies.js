@@ -188,6 +188,14 @@ export function evaluate(name, candles, cfg) {
     const kS = p.shortK ?? p.k;
     const slopeRef = p.shortSlopeBars > 0 && trendArr ? trendArr[i - p.shortSlopeBars] : null;
     const falling = !(p.shortSlopeBars > 0) || (slopeRef != null && trend < slopeRef);
+    // volume confirmation (0 = off): breakout candle volume > volMult × mean volume of the prior volPeriod candles
+    let volOk = true, volRatio = null;
+    if (p.volMult > 0) {
+      const prior = candles.slice(Math.max(0, i - p.volPeriod), i);
+      const avg = prior.reduce((a, c) => a + (c.v || 0), 0) / Math.max(1, prior.length);
+      volRatio = avg > 0 ? k.v / avg : null;
+      volOk = volRatio != null && volRatio > p.volMult;
+    }
     const o0 = dayOpen(i), o1 = dayOpen(i - 1), prev = candles[i - 1];
     const up = o0 + p.k * a0, dn = o0 - kS * a0;
     const trAtr = atr(candles, p.trailPeriod)[i];
@@ -197,11 +205,11 @@ export function evaluate(name, candles, cfg) {
       ready: true, candleTime: k.t, close: k.c, atr: atrVal, barMs,
       maxHoldMs: { LONG: p.maxHoldBars * barMs, SHORT: (p.shortHoldBars ?? p.maxHoldBars) * barMs },
       // event: the close crosses the level on this candle; only in the direction of the trend EMA
-      longCond: prev.c <= o1 + p.k * a1 && k.c > up && (trend == null || k.c > trend),
-      shortCond: prev.c >= o1 - kS * a1 && k.c < dn && (trend == null || k.c < trend) && falling,
+      longCond: prev.c <= o1 + p.k * a1 && k.c > up && (trend == null || k.c > trend) && volOk,
+      shortCond: prev.c >= o1 - kS * a1 && k.c < dn && (trend == null || k.c < trend) && falling && volOk,
       longExit: k.c < longTrail,
       shortExit: k.c > shortTrail,
-      view: { dayOpen: o0, upper: up, lower: dn, trend, longTrail, shortTrail, atr: atrVal },
+      view: { dayOpen: o0, upper: up, lower: dn, trend, longTrail, shortTrail, volRatio, atr: atrVal },
     };
   }
   if (name === 'TREND_RIDER') {

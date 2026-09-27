@@ -398,6 +398,7 @@ function stratCard(s, st, sym, f) {
     add(`추세 EMA${pp.trendPeriod}`, fPrice(v.trend, f), v.trend && s.symbols[sym].price < v.trend ? 'down' : 'up');
     add('롱 추적 청산선', fPrice(v.longTrail, f), 'down');
     add('최대 보유', `${pp.maxHoldBars}봉`);
+    if (pp.volMult > 0) add(`거래량 / ${pp.volPeriod}봉 평균`, v.volRatio != null ? `${fNum(v.volRatio, 2)}배 (기준 ${pp.volMult}배)` : '—', v.volRatio > pp.volMult ? 'up' : '');
   } else if (st === 'TREND_RIDER') {
     const pp = cfg.params;
     add(`${pp.entryPeriod}${U} 최고가 / 최저가`, `${fPrice(v.entryHigh, f)} / ${fPrice(v.entryLow, f)}`);
