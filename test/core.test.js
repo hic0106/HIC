@@ -206,6 +206,80 @@ test('live: definitive rejection frees the slot', async () => {
   assert.equal(slot.pending, null);
 });
 
+test('live: close rejected -2022 after an app close -> bot position closed only if Binance qty is 0', async () => {
+  const { engine } = newEngine('LIVE');
+  engine.live = { ...engine.live, status: 'CONNECTED', hedgeMode: true, leverage: { BTCUSDT: 1, ETHUSDT: 1, XRPUSDT: 1 }, account: { equity: 1000, available: 1000 } };
+  let exPositions = [];
+  engine.liveClient = {
+    hasKeys: () => true,
+    account: async () => ({ totalMarginBalance: '1000', totalWalletBalance: '1000', availableBalance: '1000', totalUnrealizedProfit: '0', positions: exPositions }),
+    newOrder: async (p) => ({ orderId: 1, status: 'FILLED', avgPrice: '100', executedQty: p.quantity, clientOrderId: p.newClientOrderId }),
+    userTrades: async () => [{ commission: '0.05', commissionAsset: 'USDT' }],
+    newAlgoOrder: async () => { throw new BinanceError('HTTP 400 -1111', { code: -1111, status: 400, definitive: true }); },
+  };
+  await engine.openPosition('ADX', 'XRPUSDT', 'LONG', { atr: 1 });
+  const slot = engine.slot('ADX', 'XRPUSDT');
+  const qty = slot.position.qty;
+  engine.liveClient.newOrder = async () => { throw new BinanceError('HTTP 400 -2022 ReduceOnly Order is rejected.', { code: -2022, status: 400, definitive: true }); };
+  // exchange still holds the position -> plain rejection, nothing removed
+  exPositions = [{ symbol: 'XRPUSDT', positionSide: 'LONG', positionAmt: String(qty) }];
+  assert.equal((await engine.closePosition('ADX', 'XRPUSDT', 'MANUAL_EXIT')).code, 'ORDER_REJECTED');
+  assert.ok(slot.position);
+  // closed in the Binance app -> bot ledger closed at the external fill price
+  exPositions = [{ symbol: 'XRPUSDT', positionSide: 'LONG', positionAmt: '0' }];
+  engine.externalFills['XRPUSDT:LONG'] = 110;
+  assert.equal((await engine.closePosition('ADX', 'XRPUSDT', 'MANUAL_EXIT')).ok, true);
+  assert.equal(slot.position, null);
+  const tr = engine.ms().trades[0];
+  assert.equal(tr.exitReason, 'EXTERNAL_CLOSE');
+  assert.equal(tr.exitPrice, 110);
+});
+
+test('add-on entries: signal again while holding adds up to general.maxAdds, avg price, stop only tightened', async () => {
+  const { engine } = newEngine('PAPER');
+  engine.cfg.strategies.TSMOM.enabled = true;
+  engine.cfg.general.maxAdds = 2;
+  const DAY = 86_400_000;
+  const bars = (n) => Array.from({ length: 60 + n }, (_, i) => { const c = 100 + i; return { t: i * DAY, o: c - 0.5, h: c + 1, l: c - 1, c, v: 1, T: (i + 1) * DAY - 1 }; });
+  const run = async (n) => { const b = bars(n); engine.md.s.ETHUSDT.last = b.at(-1).c; return (await engine.evaluateSlot('TSMOM', 'ETHUSDT', 'test', { bars: b })).result; };
+  assert.equal(await run(0), 'ENTRY LONG');
+  const pos = engine.slot('TSMOM', 'ETHUSDT').position;
+  const q1 = pos.qty, s1 = pos.stopPrice;
+  assert.equal(await run(1), 'ADD LONG');
+  assert.equal(pos.adds, 1);
+  assert.ok(pos.qty > q1 * 1.9);
+  assert.ok(pos.entryPrice > 159 && pos.entryPrice < 161);
+  assert.ok(pos.stopPrice >= s1);
+  assert.equal(await run(2), 'ADD LONG');
+  assert.equal(await run(3), 'HOLD', 'maxAdds reached');
+  assert.equal(pos.adds, 2);
+  engine.cfg.general.maxAdds = 0;
+  assert.equal(await run(4), 'HOLD');
+});
+
+test('live add-on: old Binance stop canceled first, new stop placed for the total qty', async () => {
+  const { engine } = newEngine('LIVE');
+  engine.live = { ...engine.live, status: 'CONNECTED', hedgeMode: true, leverage: { BTCUSDT: 1, ETHUSDT: 1, XRPUSDT: 1 }, account: { equity: 1000, available: 1000 } };
+  const algos = [];
+  const canceled = [];
+  engine.liveClient = {
+    hasKeys: () => true,
+    account: async () => ({ totalMarginBalance: '1000', totalWalletBalance: '1000', availableBalance: '1000', totalUnrealizedProfit: '0', positions: [] }),
+    newOrder: async (p) => ({ orderId: 1, status: 'FILLED', avgPrice: '100', executedQty: p.quantity, clientOrderId: p.newClientOrderId }),
+    userTrades: async () => [{ commission: '0.05', commissionAsset: 'USDT' }],
+    newAlgoOrder: async (p) => { algos.push(p); return { algoId: algos.length }; },
+    cancelAlgoOrder: async (id) => { canceled.push(id); return {}; },
+  };
+  await engine.openPosition('ADX', 'XRPUSDT', 'LONG', { atr: 1 });
+  const pos = engine.slot('ADX', 'XRPUSDT').position;
+  const first = pos.exStop.clientAlgoId;
+  assert.equal((await engine.openPosition('ADX', 'XRPUSDT', 'LONG', { atr: 1 }, true)).ok, true);
+  assert.deepEqual(canceled, [first]);
+  assert.equal(algos.length, 2);
+  assert.equal(Number(algos[1].quantity), pos.qty);
+  assert.equal(pos.adds, 1);
+});
+
 test('emergency stop triggers ATR_STOP exit', async () => {
   const { engine } = newEngine('PAPER');
   await engine.openPosition('TURTLE', 'XRPUSDT', 'SHORT', { atr: 1 });

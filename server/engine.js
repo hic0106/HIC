@@ -28,6 +28,7 @@ export class Engine {
     this.log = logger;
     this.busy = new Set();
     this.live = { status: 'NO_KEYS', hedgeMode: null, leverage: {}, account: null, error: null, lastCheck: 0, exchangePositions: null };
+    this.externalFills = {}; // `${symbol}:${positionSide}` -> last price of a fill not placed by the bot
     this.liveClient = null;
     this.lastTickCheck = {};
     this.events = new EventEmitter(); // 'change' after fills / closes -> portfolio refresh
@@ -315,6 +316,18 @@ export class Engine {
         }
         exited = ex.reason === 'STRATEGY_EXIT' ? `EXIT ${side}` : `EXIT ${side} ${ex.reason}`;
       } else {
+        const pos = slot.position;
+        const again = side === 'LONG' ? sig.longCond : sig.shortCond && scfg.shortEnabled;
+        const trendFull = STRATEGY_META[strategy].trendEntries && (slot.trendCount?.[side] || 0) >= scfg.params.maxEntriesPerTrend;
+        if (again && allowEntry && !trendFull && (pos.adds || 0) < (this.cfg.general.maxAdds ?? 0)) {
+          if (!slot.lastSkip) this.log.trade(`${tag} ${side} signal while holding — add ${(pos.adds || 0) + 1}/${this.cfg.general.maxAdds} (${trigger})`, 'SIGNAL');
+          const r = await this.openPosition(strategy, symbol, side, sig, true);
+          if (!r.ok && r.transient) return this.skip(slot, sig, r.code, r.msg);
+          slot.lastActedCandle = sig.candleTime;
+          slot.lastSkip = null;
+          this.store.saveState();
+          return out(r.ok ? `ADD ${side}` : `ADD_SKIPPED ${side} ${r.code || ''}`.trim(), true, { side });
+        }
         slot.lastSignal = `HOLD ${side}`;
         slot.lastActedCandle = sig.candleTime;
         slot.lastSkip = null;
@@ -393,7 +406,7 @@ export class Engine {
   }
 
   // ---------- pre-trade checks
-  async preTradeChecks(strategy, symbol, side, isExit = false) {
+  async preTradeChecks(strategy, symbol, side, isExit = false, isAdd = false) {
     const scfg = this.cfg.strategies[strategy];
     const g = this.cfg.general;
     const fail = (code, msg) => ({ ok: false, code, msg, transient: TRANSIENT.has(code) });
@@ -402,7 +415,7 @@ export class Engine {
       if (this.runState !== 'RUNNING') return fail('BOT_STOPPED', 'Bot not running');
       if (!scfg.enabled) return fail('STRATEGY_DISABLED', `${strategy} disabled`);
       if (side === 'SHORT' && (!scfg.shortEnabled || !STRATEGY_META[strategy].supportsShort)) return fail('SHORT_DISABLED', `${strategy} short disabled`);
-      if (slot.position || slot.status !== 'FLAT') return fail('POSITION_EXISTS', `${strategy} ${symbol} already has a position (${slot.status})`);
+      if (isAdd ? slot.position?.side !== side || slot.status !== side : slot.position || slot.status !== 'FLAT') return fail('POSITION_EXISTS', `${strategy} ${symbol} already has a position (${slot.status})`);
       // checked right before every new entry (exits are never blocked by the universe)
       if (this.universe && !this.universe.isTradeAllowed(symbol, scfg.universe)) {
         const su = scfg.universe || {};
@@ -451,12 +464,13 @@ export class Engine {
   }
 
   // ---------- open / close
-  async openPosition(strategy, symbol, side, sig) {
+  // add=true: add-on entry to the slot's open position (same side); the Binance stop is re-placed for the total qty
+  async openPosition(strategy, symbol, side, sig, add = false) {
     const key = slotKey(strategy, symbol);
     if (this.busy.has(key)) return { ok: false, code: 'BUSY', transient: true, msg: 'busy' };
     this.busy.add(key);
     try {
-      let chk = await this.preTradeChecks(strategy, symbol, side);
+      let chk = await this.preTradeChecks(strategy, symbol, side, false, add);
       const tag = `${strategy} ${symbol.replace('USDT', '')}`;
       const scfg = this.cfg.strategies[strategy];
       if (chk.ok && scfg.stop.mode === 'STRUCTURE') {
@@ -473,12 +487,20 @@ export class Engine {
       const ctlNote = chk.ctrl.status === 'OFF' || chk.ctrl.status === 'NOT_APPLIED' ? '' : ` (base ${chk.baseAmount} × ${chk.ctrl.multiplier} controller ${chk.ctrl.status})`;
       this.log.trade(`${tag} requested order: ${chk.amount} USDT${ctlNote} → qty ${fmtQty(chk.qty, chk.filters.stepSize)} (≈${chk.notional.toFixed(2)} USDT) ${this.mode} ${chk.leverage}x`, 'ORDER_REQUEST');
       const slot = this.slot(strategy, symbol);
+      if (add && this.mode === 'LIVE' && slot.position.exStop) {
+        // old stop covers only the old qty: cancel first (as before a close), re-placed for the total after the fill
+        const c = await this.cancelExchangeStop(slot);
+        if (c.triggered) return { ok: false, code: 'STOPPED_OUT', msg: 'exchange stop already filled' };
+        if (!c.ok) return { ok: false, code: 'STOP_CANCEL_FAILED', transient: true, msg: c.msg };
+      }
       const order = this.newOrderRecord({ strategy, symbol, action: 'OPEN', side, qty: chk.qty, amount: chk.amount, refPrice: chk.price });
-      slot.pending = { clientOrderId: order.clientOrderId, action: 'OPEN', side, qty: chk.qty, amount: chk.amount, baseAmount: chk.baseAmount, ctrlMultiplier: chk.ctrl.multiplier, ctrlStatus: chk.ctrl.status, atr: sig?.atr ?? null,
+      slot.pending = { clientOrderId: order.clientOrderId, action: 'OPEN', add, side, qty: chk.qty, amount: chk.amount, baseAmount: chk.baseAmount, ctrlMultiplier: chk.ctrl.multiplier, ctrlStatus: chk.ctrl.status, atr: sig?.atr ?? null,
         structStop: sig?.structStop?.[side] ?? null, histTarget: sig?.histTarget?.[side] ?? null, signalCandle: sig?.candleTime ?? null, createdAt: Date.now(), notFound: 0 };
       slot.status = 'PENDING';
       this.store.saveStateNow(); // persist intent BEFORE sending (crash safety)
-      return await this.execute(slot, order);
+      const r = await this.execute(slot, order);
+      if (add && this.mode === 'LIVE' && slot.position && !slot.position.exStop && !slot.pending) await this.placeExchangeStop(slot); // rejected add: restore the stop
+      return r;
     } finally {
       this.busy.delete(key);
       // filled although the structure stop ended up on the wrong side of the actual fill (slippage) -> undo the entry
@@ -545,6 +567,14 @@ export class Engine {
         fill = await this.liveMarketOrder(order);
       } catch (e) {
         if (e instanceof BinanceError && e.definitive) {
+          if (order.action === 'CLOSE' && /-2022/.test(e.message) && await this.exchangeFlat(slot)) {
+            // position already closed outside the bot (Binance app): nothing to reduce -> close the bot ledger too
+            const px = this.externalFills[`${slot.symbol}:${order.positionSide}`] || order.refPrice;
+            slot.pending.reason = 'EXTERNAL_CLOSE';
+            this.log.warn(`${tag} ${order.positionSide} already closed on Binance (qty 0) — bot position closed @ ${px} (last external fill)`, 'EXTERNAL_CLOSE');
+            this.applyFill(slot, order, { avgPrice: px, executedQty: slot.position.qty, fee: 0 });
+            return { ok: true, msg: 'already closed on Binance' };
+          }
           order.status = 'REJECTED';
           order.error = e.message;
           this.revertPending(slot);
@@ -631,7 +661,29 @@ export class Engine {
     const pend = slot.pending;
     const scfg = this.cfg.strategies[slot.strategy];
 
-    if (pend.action === 'OPEN') {
+    if (pend.action === 'OPEN' && pend.add && slot.position) {
+      const pos = slot.position;
+      const es = entryStop(scfg.stop, { atr: pend.atr, structStop: { [pos.side]: pend.structStop } }, pos.side, fill.avgPrice);
+      const qty = pos.qty + fill.executedQty;
+      pos.entryPrice = (pos.entryPrice * pos.qty + fill.avgPrice * fill.executedQty) / qty;
+      pos.qty = qty;
+      pos.entryNotional += fill.avgPrice * fill.executedQty;
+      pos.entryFee += fill.fee;
+      pos.orderAmount += pend.amount;
+      pos.baseAmount = (pos.baseAmount ?? 0) + (pend.baseAmount ?? pend.amount);
+      pos.adds = (pos.adds || 0) + 1;
+      // stop recomputed from the add-on fill, only ever tightened (long: up, short: down)
+      if (es.stopPrice != null && !es.invalid && pos.stopPrice != null) {
+        const ns = roundToTick(es.stopPrice, this.md.filters[slot.symbol]?.tickSize || 0);
+        if (dirOf(pos.side) * (ns - pos.stopPrice) > 0) pos.stopPrice = ns;
+      }
+      if (pos.stopPrice != null) pos.stopPct = Math.abs(pos.entryPrice - pos.stopPrice) / pos.entryPrice * 100;
+      if (STRATEGY_META[slot.strategy].trendEntries && pend.signalCandle != null) slot.trendEntries = recordTrendEntry(slot.trendEntries, pos.side, pend.signalCandle);
+      if (ms.wallet != null && this.mode === 'PAPER') ms.wallet -= fill.fee;
+      slot.status = pos.side;
+      slot.lastSignal = `${pos.side} ADD ${pos.adds}`;
+      this.log.trade(`${tag} ${pos.side} add ${pos.adds} @ ${fill.avgPrice} qty ${fill.executedQty} → total ${qty}, avg ${pos.entryPrice.toPrecision(6)}, stop ${pos.stopPrice?.toPrecision(6) ?? '—'}`, 'POSITION_ADD');
+    } else if (pend.action === 'OPEN') {
       const side = pend.side;
       const es = entryStop(scfg.stop, { atr: pend.atr, structStop: { [side]: pend.structStop } }, side, fill.avgPrice);
       const distPct = es.distPct;
@@ -686,6 +738,13 @@ export class Engine {
     slot.pending = null;
     this.store.saveStateNow();
     this.emitChange(pend.action === 'OPEN' ? 'fill' : 'close');
+  }
+
+  // fresh account read: true only if Binance holds no quantity on this symbol/side
+  async exchangeFlat(slot) {
+    try { await this.refreshLiveAccount(); } catch { return false; }
+    const p = this.live.exchangePositions.find((x) => x.symbol === slot.symbol && x.positionSide === slot.position.side);
+    return !p || Number(p.positionAmt) === 0;
   }
 
   revertPending(slot) {

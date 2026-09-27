@@ -237,7 +237,8 @@ export class AiService {
         if (c.error) { c.verdict = 'INVALID'; continue; }
         const isBetter = score(c.inSample) > score(b.inSample);
         const oosOk = c.outSample.returnPct >= b.outSample.returnPct - 0.5 && c.outSample.maxDrawdownPct <= b.outSample.maxDrawdownPct + 2;
-        c.verdict = isBetter && oosOk ? 'PASSED' : isBetter ? 'OVERFIT' : 'WORSE';
+        // no out-of-sample trades = nothing was verified (equal OOS numbers would otherwise pass every candidate)
+        c.verdict = !isBetter ? 'WORSE' : !c.outSample.trades ? 'NO_OOS' : oosOk ? 'PASSED' : 'OVERFIT';
         c.score = r2(score(c.full));
       }
       candidates.sort((x, y) => (y.verdict === 'PASSED') - (x.verdict === 'PASSED') || (y.score ?? -1e9) - (x.score ?? -1e9));

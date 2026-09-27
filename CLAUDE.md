@@ -38,6 +38,8 @@
 | RAYNER (기본 OFF) | 코인 Universe | 4h | EMA50 + MACD(1,50,9) 히스토그램 가속, STRUCTURE 손절(최근 10봉), 히스토그램 목표 익절(진입 시 고정), 추세당 최대 2회 |
 | QQQ_EMA_TREND / QQQ_TSMOM (ON), QQQ_SMA200 / QQQ_TURTLE_50_20 (OFF) | QQQUSDT | 미국 정규장 세션 | 롱/현금만 |
 
+추가 매수: 보유 중 같은 방향 진입 조건이 다시 참이면 캔들당 1회, 포지션당 최대 `general.maxAdds`(기본 3, 0=끔)회 추가. 평균단가 합산, 손절은 추가 체결가 기준 재계산 후 유리한 쪽으로만 이동, LIVE는 기존 Binance Stop 취소 → 총수량으로 재등록. 백테스트는 추가 매수 미반영.
+
 Stop은 ATR_DYNAMIC(min/max 클램프), LIVE에서는 Binance Algo STOP_MARKET로 등록. Take Profit은 봇이 감시.
 
 ## 구성 요소 요약

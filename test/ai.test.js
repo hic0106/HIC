@@ -94,7 +94,7 @@ test('ai improve: candidates are backtested in/out of sample, verdicts set, noth
   const good = imp.candidates.filter((c) => !c.error);
   const bad = imp.candidates.filter((c) => c.error);
   assert.equal(bad.length, 2, 'order amounts can never be changed by AI');
-  assert.ok(good.every((c) => ['PASSED', 'OVERFIT', 'WORSE'].includes(c.verdict) && c.inSample && c.outSample));
+  assert.ok(good.every((c) => ['PASSED', 'OVERFIT', 'WORSE', 'NO_OOS'].includes(c.verdict) && c.inSample && c.outSample));
   assert.deepEqual(store.config.strategies.TSMOM, before, 'not applied without the user');
   assert.ok(imp.split.cut > imp.split.start && imp.split.cut < imp.split.end);
 });

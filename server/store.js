@@ -21,6 +21,7 @@ export const DEFAULT_CONFIG = {
     takerFeePct: 0.05,
     makerFeePct: 0.02,
     slippagePct: 0.05,
+    maxAdds: 3, // add-on entries per position when the entry signal fires again while holding (0 = off)
     includeFunding: true,
     paperInitialBalance: 10000,
     stopsActiveWhenStopped: true, // Emergency stops keep protecting positions after STOP ALL BOTS

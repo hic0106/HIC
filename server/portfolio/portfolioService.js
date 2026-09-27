@@ -233,6 +233,7 @@ export class PortfolioService extends EventEmitter {
     } else if (id.startsWith('HIC-')) {
       this.engine.resolveUnknownOrders().catch?.(() => {});
     } else {
+      (this.engine.externalFills ||= {})[`${o.s}:${o.ps}`] = Number(o.L);
       this.log.warn(`External order fill on ${o.s} ${o.ps || ''} ${o.S} ${o.l} @ ${o.L} (not placed by this bot) — shown as UNATTRIBUTED, not hidden`, 'EXTERNAL_ORDER');
     }
     this.refreshSoon();
