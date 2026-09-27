@@ -140,7 +140,7 @@ app.get('/api/mobile', (req, res) => {
       ts: s.ts, mode: s.mode, runState: s.runState, conn: { market: s.conn.market, exchange: s.conn.exchange, testnet: s.conn.testnet, liveError: s.conn.liveError },
       account: { ...s.account, bySymbol: undefined, byClass: undefined }, wallets: w,
       positions: s.positions.map((p) => ({ strategy: p.strategy, symbol: p.symbol, side: p.side, qty: p.qty, entryPrice: p.entryPrice, markPrice: p.markPrice, pnl: p.pnl, pnlPct: p.pnlPct, pricePct: p.pricePct,
-        stopPrice: p.stopPrice, stopDistPct: p.stopDistPct, tpPrice: p.tpPrice, leverage: p.leverage, entryTime: p.entryTime, orderAmount: p.orderAmount, currentValue: p.currentValue, exStop: p.exStop ? { status: p.exStop.status } : null,
+        stopPrice: p.stopPrice, exitLevel: p.exitLevel, stopDistPct: p.stopDistPct, tpPrice: p.tpPrice, leverage: p.leverage, entryTime: p.entryTime, orderAmount: p.orderAmount, currentValue: p.currentValue, exStop: p.exStop ? { status: p.exStop.status } : null,
         tick: s.symbols[p.symbol]?.filters?.tickSize ?? null })),
       pending: s.slots.filter((x) => x.pending).map((x) => ({ strategy: x.strategy, symbol: x.symbol, action: x.pending.action, side: x.pending.side })),
       strategies: s.strategies.map((x) => ({ strategy: x.strategy, assetClass: x.assetClass, enabled: x.enabled, open: x.open, longs: x.longs, shorts: x.shorts, unrealized: x.unrealized, realized: x.realized, trades: x.trades, winRate: x.winRate })),

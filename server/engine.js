@@ -286,6 +286,7 @@ export class Engine {
     slot.evalCandle = sig.candleTime;
     if (STRATEGY_META[strategy].trendEntries) slot.trendCount = trendCounts(sig, slot.trendEntries);
     slot.signal = { longCond: sig.longCond, shortCond: sig.shortCond, longExit: sig.longExit, shortExit: sig.shortExit };
+    slot.exitLevel = sig.exitLevel || null;
     const out = (result, final, extra = {}) => ({ result, final, sig, ...extra });
 
     if (this.runState !== 'RUNNING') return out('BOT_STOPPED', false);
@@ -1076,6 +1077,7 @@ export class Engine {
         pnlPct: (net / p.entryNotional) * 100, pricePct: ((mark / p.entryPrice) - 1) * 100 * dirOf(p.side),
         holdingMs: Date.now() - p.entryTime, status: s.status,
         stopDistPct: p.stopPrice ? Math.abs(mark - p.stopPrice) / mark * 100 : null,
+        exitLevel: s.exitLevel?.[p.side] ?? null, // strategy exit line (candle close), from the last evaluated candle
       };
     });
   }

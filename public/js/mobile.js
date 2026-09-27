@@ -98,7 +98,7 @@ function renderPositions(d) {
         <span class="pnl ${cls(p.pnl)}">${fSigned(p.pnl)}</span></div>
       <div class="row sub"><span>${fDur(Date.now() - p.entryTime)} 보유 · 금액 ${fNum(p.orderAmount, 2)}</span><span class="${cls(p.pnl)}">${fPct(p.pnlPct)}</span></div>
       <div class="grid"><div><span>진입가</span>${fPrice(p.entryPrice, tick(p))}</div><div><span>현재가</span>${fPrice(p.markPrice, tick(p))}</div><div><span>수량</span>${p.qty}</div>
-        <div><span>손절가</span><b class="down">${p.stopPrice ? fPrice(p.stopPrice, tick(p)) : '없음'}</b></div><div><span>손절까지</span>${p.stopDistPct != null ? p.stopDistPct.toFixed(2) + '%' : '—'}</div>
+        <div><span>손절가</span><b class="down">${p.stopPrice ? fPrice(p.stopPrice, tick(p)) : '없음'}</b></div><div><span>손절까지</span>${p.stopDistPct != null ? p.stopDistPct.toFixed(2) + '%' : '—'}</div><div><span>전략 청산선</span>${p.exitLevel != null ? fPrice(p.exitLevel, tick(p)) : '지표'}</div>
         <div><span>거래소 손절</span>${p.exStop ? (p.exStop.status === 'NEW' ? '<b class="up">등록</b>' : esc(p.exStop.status)) : live() ? '<b class="warn">없음</b>' : '—'}</div></div>
       <div class="row"><span class="sub">${p.tpPrice ? `익절가 ${fPrice(p.tpPrice, tick(p))}` : ''}</span><button class="btn small danger" data-close="${esc(p.strategy)}|${esc(p.symbol)}">청산</button></div>
     </div>`).join('') : '<div class="empty">보유 포지션 없음</div>';

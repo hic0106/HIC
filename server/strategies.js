@@ -112,6 +112,7 @@ export function evaluate(name, candles, cfg) {
       longCond, shortCond,
       longExit: k.c < exitLow,
       shortExit: k.c > exitHigh,
+      exitLevel: { LONG: exitLow, SHORT: exitHigh },
       view: { entryHigh, entryLow, exitLow, exitHigh, sma: smaVal, atr: atrVal },
     };
   }
@@ -139,6 +140,7 @@ export function evaluate(name, candles, cfg) {
       shortCond: false,
       longExit: mom <= 0,
       shortExit: true,
+      exitLevel: { LONG: candles[i + 1 - p.lookback]?.c ?? null, SHORT: null }, // next close <= this -> momentum <= 0
       view: { momentum: mom, momentumPct: (Math.exp(mom) - 1) * 100, atr: atrVal },
     };
   }
@@ -169,6 +171,7 @@ export function evaluate(name, candles, cfg) {
       shortCond: k.c < e0 && e0 < eS && h0 < 0 && h0 < minPrev * mult,
       longExit: k.c < e0 || h0 < 0,
       shortExit: k.c > e0 || h0 > 0,
+      exitLevel: { LONG: e0, SHORT: e0 },
       structStop: { LONG: longStop, SHORT: shortStop },
       histTarget: { LONG: longTarget, SHORT: shortTarget },
       trend: { lastBelow, lastAbove },
@@ -209,6 +212,7 @@ export function evaluate(name, candles, cfg) {
       shortCond: prev.c >= o1 - kS * a1 && k.c < dn && (trend == null || k.c < trend) && falling && volOk,
       longExit: k.c < longTrail,
       shortExit: k.c > shortTrail,
+      exitLevel: { LONG: longTrail, SHORT: shortTrail },
       view: { dayOpen: o0, upper: up, lower: dn, trend, longTrail, shortTrail, volRatio, atr: atrVal },
     };
   }
@@ -226,6 +230,7 @@ export function evaluate(name, candles, cfg) {
       shortCond: k.c < entryLow && k.c < smaVal,
       longExit: k.c < longTrail,
       shortExit: k.c > shortTrail,
+      exitLevel: { LONG: longTrail, SHORT: shortTrail },
       view: { entryHigh, entryLow, sma: smaVal, longTrail, shortTrail, atr: atrVal },
     };
   }

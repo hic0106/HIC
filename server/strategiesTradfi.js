@@ -44,15 +44,15 @@ export function evaluateTradfi(name, candles, cfg) {
   }
   if (name === 'QQQ_TSMOM') {
     const mom = logMomentum(candles, i, p.lookback);
-    return { ...base, longCond: mom > 0 && filterOk, longExit: mom <= 0, view: { momentum: mom, momentumPct: (Math.exp(mom) - 1) * 100, sma200, atr: atrVal, filter: p.sma200Filter } };
+    return { ...base, longCond: mom > 0 && filterOk, longExit: mom <= 0, exitLevel: { LONG: candles[i + 1 - p.lookback]?.c ?? null }, view: { momentum: mom, momentumPct: (Math.exp(mom) - 1) * 100, sma200, atr: atrVal, filter: p.sma200Filter } };
   }
   if (name === 'QQQ_SMA200') {
     const s = sma(closes, p.smaPeriod)[i];
-    return { ...base, longCond: k.c > s, longExit: k.c <= s, view: { sma: s, above: k.c > s, atr: atrVal } };
+    return { ...base, longCond: k.c > s, longExit: k.c <= s, exitLevel: { LONG: s }, view: { sma: s, above: k.c > s, atr: atrVal } };
   }
   if (name === 'QQQ_TURTLE_50_20') {
     const hi = priorHigh(candles, i, p.entryPeriod), lo = priorLow(candles, i, p.exitPeriod);
-    return { ...base, longCond: k.c > hi, longExit: k.c < lo, view: { entryHigh: hi, exitLow: lo, sma200, atr: atrVal } };
+    return { ...base, longCond: k.c > hi, longExit: k.c < lo, exitLevel: { LONG: lo }, view: { entryHigh: hi, exitLow: lo, sma200, atr: atrVal } };
   }
   throw new Error(`unknown tradfi strategy ${name}`);
 }
