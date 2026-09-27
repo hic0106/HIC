@@ -1,7 +1,7 @@
 // Strategy registry: maps asset classes to strategy groups.
 //   CRYPTO        (dynamic universe, server/universe.js) : TURTLE, ADX, TSMOM, RAYNER — from strategies.js
 //   TRADFI_INDEX  (QQQ)         : QQQ_EMA_TREND, QQQ_TSMOM, QQQ_SMA200, QQQ_TURTLE_50_20
-import { STRATEGIES as CRYPTO_STRATEGIES, STRATEGY_META as CRYPTO_META, evaluate as evaluateCrypto, stopDistancePct, exitFor, entryStop, stopReasonOf, trendCounts, recordTrendEntry } from './strategies.js';
+import { STRATEGIES as CRYPTO_STRATEGIES, STRATEGY_META as CRYPTO_META, evaluate as evaluateCrypto, stopDistancePct, holdMsOf, exitFor, entryStop, stopReasonOf, trendCounts, recordTrendEntry } from './strategies.js';
 import { TRADFI_STRATEGIES, TRADFI_META, evaluateTradfi } from './strategiesTradfi.js';
 import { assetClassOf, symbolsOfClass } from './assets.js';
 
@@ -32,6 +32,7 @@ export function impliedSide(name, candles, cfg, lookback = 250) {
     const s = evaluateStrategy(name, candles.slice(0, i), cfg);
     if (!s.ready) continue;
     if ((side === 'LONG' && s.longExit) || (side === 'SHORT' && s.shortExit)) side = null;
+    if (side && holdMsOf(s, side) && s.candleTime - since >= holdMsOf(s, side)) side = null; // held past the max holding time
     if (!side) {
       side = s.longCond ? 'LONG' : s.shortCond && allowShort ? 'SHORT' : null;
       since = side ? s.candleTime : null;

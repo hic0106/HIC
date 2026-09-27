@@ -10,7 +10,7 @@ export const STATUS = {
 export const EXIT = {
   STRATEGY_EXIT: '전략 청산', ATR_STOP: 'ATR 손절', FIXED_STOP: '고정 손절', TAKE_PROFIT: '익절',
   MANUAL_EXIT: '수동 청산', EMERGENCY_CLOSE: '전체 비상청산',
-  STRUCTURE_STOP: '구조 손절', RAYNER_HIST_TP: '히스토그램 목표 익절', STOP_INVALID: '손절가 오류 (진입 취소)',
+  STRUCTURE_STOP: '구조 손절', RAYNER_HIST_TP: '히스토그램 목표 익절', TIME_EXIT: '시간 청산', STOP_INVALID: '손절가 오류 (진입 취소)',
 };
 export const ORDER_STATUS = {
   SUBMITTED: '전송됨', FILLED: '체결', REJECTED: '거부', UNKNOWN: '확인 중', NOT_PLACED: '미접수', ACTIVE: '활성',
@@ -18,7 +18,7 @@ export const ORDER_STATUS = {
 };
 export const TF = { '1m': '1분', '3m': '3분', '5m': '5분', '15m': '15분', '30m': '30분', '1h': '1시간', '2h': '2시간', '4h': '4시간', '6h': '6시간', '8h': '8시간', '12h': '12시간', '1d': '1일', '3d': '3일', '1w': '1주', '1M': '1개월', US_SESSION: '미국 정규장' };
 export const STRAT = {
-  TURTLE: '터틀', ADX: 'ADX', TSMOM: 'TSMOM', RAYNER: 'Rayner', TREND_RIDER: '추세 라이더', QQQ_EMA_TREND: 'QQQ EMA', QQQ_TSMOM: 'QQQ TSMOM', QQQ_SMA200: 'QQQ SMA200', QQQ_TURTLE_50_20: 'QQQ 터틀50/20', UNATTRIBUTED: '미귀속(수동)',
+  TURTLE: '터틀', ADX: 'ADX', TSMOM: 'TSMOM', RAYNER: 'Rayner', TREND_RIDER: '추세 라이더', VOL_BREAKOUT: '단타 돌파', QQQ_EMA_TREND: 'QQQ EMA', QQQ_TSMOM: 'QQQ TSMOM', QQQ_SMA200: 'QQQ SMA200', QQQ_TURTLE_50_20: 'QQQ 터틀50/20', UNATTRIBUTED: '미귀속(수동)',
 };
 export const CLASS = { CRYPTO: '코인', TRADFI_INDEX: '미국지수(QQQ)', CASH: '현금' };
 
@@ -31,7 +31,7 @@ export function resultKo(r = '') {
     .replace(/EXIT (LONG|SHORT)/g, (_, s) => `${SIDE[s]} 청산`)
     .replace(/WAIT_REARM (LONG|SHORT)/g, (_, s) => `${SIDE[s]} 재진입 대기`)
     .replace(/MAX_TREND_ENTRIES (LONG|SHORT)/g, (_, s) => `${SIDE[s]} 추세당 최대 진입 도달`)
-    .replace(/(청산) (RAYNER_HIST_TP|STRUCTURE_STOP)/g, (_, a, r) => `${a} (${EXIT[r]})`)
+    .replace(/(청산) (RAYNER_HIST_TP|STRUCTURE_STOP|TIME_EXIT)/g, (_, a, r) => `${a} (${EXIT[r]})`)
     .replace(/EXIT_FAILED/g, '청산 실패')
     .replace(/^HOLD$/, '유지(변화 없음)')
     .replace(/BOT_STOPPED/g, '봇 정지 중')

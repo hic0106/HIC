@@ -8,7 +8,7 @@ import { BinanceUsSessionProvider } from '../dataProviders.js';
 import { DATA_DIR } from '../store.js';
 import { backtestStrategy, computeMetrics, LIVE_WINDOW } from './backtester.js';
 import { historicalTradeSets, tradeFilterFrom, UNIVERSE_METHOD } from './historicalUniverse.js';
-import { universeConfig } from '../universe.js';
+import { universeConfig, MAJORS } from '../universe.js';
 
 const DAY = 86_400_000;
 // Short candles: the test period is capped at ~26,000 bars per symbol (download size / Binance weight / run time)
@@ -134,20 +134,26 @@ export class BacktestRunner {
   universeFor(config, ctx, strategy, custom) {
     const u = universeConfig(config);
     const crypto = custom ? true : STRATEGY_CLASS[strategy] === 'CRYPTO';
-    if (!u.backtestDynamic || !crypto) return {};
-    const symbols = custom?.symbols || symbolsForStrategy(strategy);
+    // per-strategy universe (same rule as the live engine): majors optionally excluded, own top N
+    const su = custom ? null : config.strategies?.[strategy]?.universe;
+    const excl = new Set(su?.excludeMajors ? MAJORS : []);
+    const fallback = excl.size ? { tradeFilter: (s) => !excl.has(s) } : {}; // no ranking: exclusions still apply
+    if (!u.backtestDynamic || !crypto) return fallback;
+    const topN = su?.topN || u.tradeTopN;
+    const symbols = (custom?.symbols || symbolsForStrategy(strategy)).filter((s) => !excl.has(s));
+    const always = (u.alwaysInclude || []).filter((s) => !excl.has(s));
     const daily = ctx.data['1d'] || {};
-    if (!symbols.length || symbols.some((s) => !daily[s])) return {};
-    const key = `${symbols.join(',')}|${u.tradeTopN}|${u.backtestRankLookbackDays}|${u.backtestRebalanceDays}|${u.minListingDays}`;
+    if (!symbols.length || symbols.some((s) => !daily[s])) return fallback;
+    const key = `${symbols.join(',')}|${topN}|${always.join(',')}|${u.backtestRankLookbackDays}|${u.backtestRebalanceDays}|${u.minListingDays}`;
     ctx.universeSets ||= {};
     const sets = (ctx.universeSets[key] ||= historicalTradeSets(daily, {
       symbols, start: ctx.start, end: ctx.end, lookbackDays: u.backtestRankLookbackDays, rebalanceDays: u.backtestRebalanceDays,
-      topN: u.tradeTopN, minListingDays: u.minListingDays, alwaysInclude: u.alwaysInclude,
+      topN, minListingDays: u.minListingDays, alwaysInclude: always,
     }));
     return {
-      tradeFilter: tradeFilterFrom(sets), slots: u.tradeTopN,
-      universeNote: `${UNIVERSE_METHOD}: new entries only for the top ${u.tradeTopN} of ${symbols.length} watched symbols by ${u.backtestRankLookbackDays}d quote volume before each ${u.backtestRebalanceDays}d rebalance`,
-      meta: { method: UNIVERSE_METHOD, watchSymbols: symbols.length, tradeTopN: u.tradeTopN, lookbackDays: u.backtestRankLookbackDays, rebalanceDays: u.backtestRebalanceDays,
+      tradeFilter: tradeFilterFrom(sets), slots: topN,
+      universeNote: `${UNIVERSE_METHOD}: new entries only for the top ${topN} of ${symbols.length} watched symbols${excl.size ? ' (BTC/ETH excluded)' : ''} by ${u.backtestRankLookbackDays}d quote volume before each ${u.backtestRebalanceDays}d rebalance`,
+      meta: { method: UNIVERSE_METHOD, watchSymbols: symbols.length, tradeTopN: topN, excludeMajors: excl.size > 0, lookbackDays: u.backtestRankLookbackDays, rebalanceDays: u.backtestRebalanceDays,
         rebalances: sets.length, last: sets.length ? [...sets[sets.length - 1].symbols] : [] },
     };
   }

@@ -125,7 +125,7 @@ test('timeframes: every Binance interval selectable for crypto strategies; caps 
   const { validateStrategySettings } = await import('../server/strategyConfig.js');
   const { barIntervalsFor, defaultGraceMin, KLINE_TIMEFRAMES } = await import('../server/scheduler/timeframes.js');
   const c = cfg();
-  for (const name of ['TURTLE', 'ADX', 'TSMOM', 'RAYNER', 'TREND_RIDER']) for (const tf of KLINE_TIMEFRAMES) {
+  for (const name of ['TURTLE', 'ADX', 'TSMOM', 'RAYNER', 'TREND_RIDER', 'VOL_BREAKOUT']) for (const tf of KLINE_TIMEFRAMES) {
     assert.equal(validateStrategySettings(name, { ...structuredClone(c.strategies[name]), timeframe: tf }, c.strategies[name]).timeframe, tf, `${name} ${tf}`);
   }
   assert.equal(MAX_DAYS['1m'], 18);
@@ -135,7 +135,7 @@ test('timeframes: every Binance interval selectable for crypto strategies; caps 
   assert.equal(runner.effectiveDays(365, [{ s: 'BTCUSDT', tf: '1m' }]), 18);
   assert.equal(runner.effectiveDays(365, [{ s: 'BTCUSDT', tf: '1w' }]), 365);
   c.strategies.TURTLE.timeframe = '1m'; c.strategies.TSMOM.timeframe = '1d'; c.strategies.ADX.timeframe = '12h';
-  assert.deepEqual(barIntervalsFor(c).sort(), ['12h', '1m', '4h'].sort());
+  assert.deepEqual(barIntervalsFor(c).sort(), ['12h', '1h', '1m', '4h'].sort()); // 1h: VOL_BREAKOUT default
   assert.equal(defaultGraceMin('1m'), 1);
   assert.equal(defaultGraceMin('1h'), 30);
   // Turtle on 1h candles: signal on close, fill at the next 1h open

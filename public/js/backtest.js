@@ -7,10 +7,10 @@ import { mountAi } from './ai.js';
 const LC = window.LightweightCharts;
 const TZ = -new Date().getTimezoneOffset() * 60;
 const toT = (ms) => Math.floor(ms / 1000) + TZ;
-const SHORT = { TURTLE: '터틀', ADX: 'ADX', TSMOM: 'TSMOM', RAYNER: 'Rayner', TREND_RIDER: '추세 라이더', QQQ_EMA_TREND: 'QQQ EMA', QQQ_TSMOM: 'QQQ TSMOM', QQQ_SMA200: 'QQQ SMA200', QQQ_TURTLE_50_20: 'QQQ 터틀50/20' };
+const SHORT = { TURTLE: '터틀', ADX: 'ADX', TSMOM: 'TSMOM', RAYNER: 'Rayner', TREND_RIDER: '추세 라이더', VOL_BREAKOUT: '단타 돌파', QQQ_EMA_TREND: 'QQQ EMA', QQQ_TSMOM: 'QQQ TSMOM', QQQ_SMA200: 'QQQ SMA200', QQQ_TURTLE_50_20: 'QQQ 터틀50/20' };
 const TFL = TF;
 const SIDE = { LONG: '롱', SHORT: '숏' };
-const REASON = { STRATEGY_EXIT: '전략 청산', ATR_STOP: 'ATR 손절', FIXED_STOP: '고정 손절', TAKE_PROFIT: '익절', STRUCTURE_STOP: '구조 손절', RAYNER_HIST_TP: '히스토그램 목표 익절' };
+const REASON = { STRATEGY_EXIT: '전략 청산', ATR_STOP: 'ATR 손절', FIXED_STOP: '고정 손절', TAKE_PROFIT: '익절', STRUCTURE_STOP: '구조 손절', RAYNER_HIST_TP: '히스토그램 목표 익절', TIME_EXIT: '시간 청산' };
 const noteKo = (n) => n.replace(/^(\w+): indicators never ready in the period \(insufficient history for current parameters\)/, '$1: 과거 데이터가 부족해 기간 내 신호 계산 불가').replace(/^(\w+): first (\d+) candle\(s\) of the period without a signal \(indicator warm-up \/ limited history\)/, '$1: 기간 초반 $2개 캔들은 데이터 부족으로 신호 없음').replace('no candles in the test period', '기간 내 캔들 없음')
   .replace(/^HISTORICAL_QUOTE_VOLUME_WITHIN_WATCH_SET: new entries only for the top (\d+) of (\d+) watched symbols by (\d+)d quote volume before each (\d+)d rebalance/, '과거 거래대금 순위(현재 감시 $2종목 안에서): 리밸런싱($4일)마다 직전 $3일 거래대금 상위 $1개만 신규 진입')
   .replace(/^(\d+) entry signal\(s\) skipped: symbol outside the historical trade universe at signal time/, '진입 신호 $1건 제외: 신호 시점 거래대금 진입 순위 밖')

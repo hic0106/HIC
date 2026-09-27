@@ -18,6 +18,8 @@ const DAY = 86_400_000;
 const FILE = path.join(DATA_DIR, 'universe.json');
 
 export { DEFAULT_UNIVERSE };
+// "majors" for a strategy universe with excludeMajors (alt-only strategies)
+export const MAJORS = ['BTCUSDT', 'ETHUSDT'];
 
 export const STABLE_BASES = ['USDT', 'USDC', 'FDUSD', 'TUSD', 'USDP', 'DAI', 'USDE', 'USD1', 'BUSD', 'PYUSD', 'USDS', 'RLUSD', 'USDD', 'GUSD', 'EURI', 'AEUR', 'EUR'];
 
@@ -175,9 +177,20 @@ export class UniverseManager {
   }
 
   // Crypto only: TradFi symbols are not ranked (QQQ has its own rules).
-  isTradeAllowed(symbol) {
+  // su = strategy universe { topN, excludeMajors } (null -> the shared tradeTopN set)
+  isTradeAllowed(symbol, su = null) {
     if (assetClassOf(symbol) !== 'CRYPTO') return true;
-    return this.tradeSet.has(symbol);
+    return su?.topN || su?.excludeMajors ? this.strategyTradeSet(su).has(symbol) : this.tradeSet.has(symbol);
+  }
+
+  // Per-strategy entry set: watched crypto ranked by 24h quote volume, majors optionally removed, top su.topN
+  // (+ alwaysInclude unless excluded). Without a ranking (STATIC / fallback): the shared set minus the exclusions.
+  strategyTradeSet(su) {
+    const excl = new Set(su.excludeMajors ? MAJORS : []);
+    const topN = su.topN || this.cfg.tradeTopN;
+    const ranked = this.cryptoWatch().filter((s) => this.rows[s]?.rank != null && !excl.has(s)).sort((a, b) => this.rows[a].rank - this.rows[b].rank);
+    if (!ranked.length) return new Set([...this.tradeSet].filter((s) => !excl.has(s)));
+    return new Set([...ranked.slice(0, topN), ...(this.cfg.alwaysInclude || []).filter((s) => !excl.has(s) && this.watch.includes(s))]);
   }
 
   cryptoWatch() { return this.watch.filter((s) => assetClassOf(s) === 'CRYPTO'); }

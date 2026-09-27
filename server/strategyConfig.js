@@ -24,6 +24,11 @@ export function validateStrategySettings(name, b, cur) {
       LIVE: { long: amt(b.amounts.LIVE.long), short: amt(b.amounts.LIVE.short ?? 0) },
     },
     params: {},
+    // crypto entry universe: own top N by 24h quote volume (0 = shared tradeTopN), BTC/ETH optionally excluded
+    ...(STRATEGY_CLASS[name] === 'CRYPTO' ? { universe: {
+      topN: num((b.universe ?? cur.universe)?.topN || 0, { min: 0, max: 50, int: true }) || null,
+      excludeMajors: !!(b.universe ?? cur.universe)?.excludeMajors,
+    } } : {}),
     stop: {
       mode: stopModesFor(name).includes(b.stop.mode) ? b.stop.mode : (() => { throw new Error('bad stop mode'); })(),
       atrPeriod: num(b.stop.atrPeriod, { min: 2, max: 200, int: true }),
@@ -39,6 +44,8 @@ export function validateStrategySettings(name, b, cur) {
   if (name === 'TURTLE') next.params = { entryPeriod: num(b.params.entryPeriod, P), exitPeriod: num(b.params.exitPeriod, P), smaFilter: num(b.params.smaFilter, P) };
   if (name === 'ADX') next.params = { adxPeriod: num(b.params.adxPeriod, P), threshold: num(b.params.threshold, { min: 1, max: 100 }), smaFilter: num(b.params.smaFilter, P) };
   if (name === 'TSMOM') next.params = { lookback: num(b.params.lookback, P) };
+  if (name === 'VOL_BREAKOUT') next.params = { k: num(b.params.k, { min: 0.1, max: 10 }), levelAtr: num(b.params.levelAtr, P), trailPeriod: num(b.params.trailPeriod, P), trailMult: num(b.params.trailMult, { min: 0.5, max: 10 }), maxHoldBars: num(b.params.maxHoldBars, { min: 1, max: 1000, int: true }), trendPeriod: num(b.params.trendPeriod, { min: 0, max: 1000, int: true }),
+    shortK: num(b.params.shortK ?? b.params.k, { min: 0.1, max: 10 }), shortHoldBars: num(b.params.shortHoldBars ?? b.params.maxHoldBars, { min: 1, max: 1000, int: true }), shortSlopeBars: num(b.params.shortSlopeBars ?? 0, { min: 0, max: 1000, int: true }) };
   if (name === 'TREND_RIDER') next.params = { entryPeriod: num(b.params.entryPeriod, P), trailPeriod: num(b.params.trailPeriod, P), trailMult: num(b.params.trailMult, { min: 0.5, max: 10 }), smaFilter: num(b.params.smaFilter, P) };
   if (name === 'RAYNER') {
     const q = b.params;

@@ -404,7 +404,10 @@ export class Engine {
       if (side === 'SHORT' && (!scfg.shortEnabled || !STRATEGY_META[strategy].supportsShort)) return fail('SHORT_DISABLED', `${strategy} short disabled`);
       if (slot.position || slot.status !== 'FLAT') return fail('POSITION_EXISTS', `${strategy} ${symbol} already has a position (${slot.status})`);
       // checked right before every new entry (exits are never blocked by the universe)
-      if (this.universe && !this.universe.isTradeAllowed(symbol)) return fail('UNIVERSE_FILTER', `${symbol} is watched but outside the top ${this.universe.cfg.tradeTopN} by 24h quote volume — new entry not allowed`);
+      if (this.universe && !this.universe.isTradeAllowed(symbol, scfg.universe)) {
+        const su = scfg.universe || {};
+        return fail('UNIVERSE_FILTER', `${symbol} is outside ${strategy}'s entry universe (top ${su.topN || this.universe.cfg.tradeTopN} by 24h quote volume${su.excludeMajors ? ', BTC/ETH excluded' : ''}) — new entry not allowed`);
+      }
     }
     if (slot.pending) return fail('ORDER_PENDING', `${strategy} ${symbol} has pending order`);
     if (this.md.status !== 'CONNECTED' || this.md.isStale(symbol, g.dataStaleSec)) return fail('DATA_DELAY', `${symbol} market data stale/disconnected`);

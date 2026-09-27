@@ -96,6 +96,16 @@ test('UniverseManager.init registers the watch set into SYMBOLS (live objects) a
   const snap = u.snapshot();
   assert.equal(snap.rows.find((r) => r.symbol === 'ETHUSDT').rank, 1);
   assert.equal(snap.rows.find((r) => r.symbol === 'DOTUSDT').protected, true);
+  // per-strategy universe: alts only (BTC/ETH excluded, alwaysInclude BTC dropped), own top N
+  const alts = { topN: 2, excludeMajors: true };
+  assert.deepEqual([...u.strategyTradeSet(alts)].sort(), ['SOLUSDT', 'XRPUSDT']);
+  assert.equal(u.isTradeAllowed('XRPUSDT', alts), true, 'rank 3 overall, rank 2 among alts');
+  assert.equal(u.isTradeAllowed('ETHUSDT', alts), false);
+  assert.equal(u.isTradeAllowed('BTCUSDT', alts), false, 'alwaysInclude does not override the exclusion');
+  // majors only: own top 1 (+ alwaysInclude BTC)
+  assert.deepEqual([...u.strategyTradeSet({ topN: 1 })].sort(), ['BTCUSDT', 'ETHUSDT']);
+  assert.equal(u.isTradeAllowed('SOLUSDT', { topN: 1 }), false);
+  assert.equal(u.isTradeAllowed('SOLUSDT', null), true, 'no strategy universe -> shared tradeTopN');
 
   // runtime refresh: ranks change, trade permissions follow but only inside the subscribed watch set
   rest.publicGet = async () => [tick('XRPUSDT', 2000), tick('DOTUSDT', 1500), tick('ADAUSDT', 1400), tick('ETHUSDT', 900), tick('SOLUSDT', 1), tick('BTCUSDT', 100)];

@@ -4,7 +4,7 @@ import { confirmDialog } from './modals.js';
 import { TF } from './ko.js';
 
 const LABEL = {
-  TURTLE: '터틀 20/10 · 롱 + 숏', ADX: 'ADX 추세 · 롱 + 숏', TSMOM: '30일 모멘텀 · 롱 / 현금', RAYNER: 'EMA50 + MACD · 롱 + 숏', TREND_RIDER: '돌파 + 샹들리에 추적 청산 · 롱 + 숏',
+  TURTLE: '터틀 20/10 · 롱 + 숏', ADX: 'ADX 추세 · 롱 + 숏', TSMOM: '30일 모멘텀 · 롱 / 현금', RAYNER: 'EMA50 + MACD · 롱 + 숏', TREND_RIDER: '돌파 + 샹들리에 추적 청산 · 롱 + 숏', VOL_BREAKOUT: '단타 · 알트 변동성 돌파 (1시간봉)',
   QQQ_EMA_TREND: 'EMA 추세 · 롱 / 현금', QQQ_TSMOM: '장기 모멘텀 · 롱 / 현금',
   QQQ_SMA200: 'SMA200 추세 · 선택', QQQ_TURTLE_50_20: '느린 터틀 50/20 · 선택',
 };
@@ -12,6 +12,9 @@ const PARAMS = {
   TURTLE: [['entryPeriod', '진입 기간 (봉)', 1], ['exitPeriod', '청산 기간 (봉)', 1], ['smaFilter', '숏 허용 SMA 기간', 1]],
   ADX: [['adxPeriod', 'ADX 기간', 1], ['threshold', 'ADX 기준값', 0.5], ['smaFilter', '숏 허용 SMA 기간', 1]],
   TSMOM: [['lookback', '모멘텀 기간 (일)', 1]],
+  VOL_BREAKOUT: [['k', '돌파 배수 k (ATR)', 0.5], ['levelAtr', '돌파 ATR 기간 (봉)', 1], ['trendPeriod', '추세 EMA 기간 (0 = 끔)', 1],
+    ['trailPeriod', '추적 청산 기간 (봉)', 1], ['trailMult', '추적 ATR 배수', 0.5], ['maxHoldBars', '최대 보유 (봉)', 1],
+    ['shortK', '숏 돌파 배수 k', 0.5], ['shortHoldBars', '숏 최대 보유 (봉)', 1], ['shortSlopeBars', '숏: EMA 하락 비교 (봉 전, 0 = 끔)', 1]],
   TREND_RIDER: [['entryPeriod', '돌파 기간 (봉)', 1], ['trailPeriod', '추적 청산 기간 (봉)', 1], ['trailMult', '추적 ATR 배수', 0.5], ['smaFilter', '추세 SMA 기간', 1]],
   RAYNER: [['emaPeriod', 'EMA 기간', 1], ['fastPeriod', 'MACD Fast', 1], ['slowPeriod', 'MACD Slow', 1], ['signalPeriod', 'MACD Signal', 1],
     ['slopeLookback', 'EMA 기울기 비교 (봉 전)', 1], ['momentumLookback', '히스토그램 비교 봉 수', 1], ['momentumMultiplier', '모멘텀 배수', 0.1],
@@ -96,6 +99,9 @@ function stratCol(name, c, mode, supportsShort) {
     ${c.timeframe ? `<div class="set-sec">신호 캔들</div>
     <div class="fr"><label>캔들 (마감 기준)</label><select name="timeframe">${(S_META.timeframeChoices || ['5m', '4h', '1d']).map((t) => `<option value="${t}" ${t === c.timeframe ? 'selected' : ''}>${TF[t]}</option>`).join('')}</select></div>
     ${['1m', '3m', '5m', '15m', '30m'].includes(c.timeframe) ? `<div class="note warn">${TF[c.timeframe]}봉: 신호가 많고 수수료·슬리피지 비중이 큽니다. 백테스트 기간은 약 26,000봉(${Math.floor(26000 * { '1m': 1, '3m': 3, '5m': 5, '15m': 15, '30m': 30 }[c.timeframe] / 1440)}일)까지.</div>` : ''}` : ''}
+    ${c.timeframe ? `<div class="set-sec">거래 종목</div>
+    <div class="fr"><label>거래대금 상위 N개 (0 = 공통 설정)</label>${numIn('universe.topN', c.universe?.topN ?? 0, 1, 'min="0" max="50"')}</div>
+    <div class="fr"><label>BTC · ETH 제외 (알트 전용)</label><span>${sw('universe.excludeMajors', !!c.universe?.excludeMajors)}</span></div>` : ''}
     <div class="set-sec">진입 / 청산 조건</div>
     ${PARAMS[name].map(([k, l, st]) => `<div class="fr"><label>${l}</label>${paramInput(k, c.params[k], st)}</div>`).join('')}
     <div class="set-sec">손절 (비상 Stop)</div>
@@ -109,7 +115,9 @@ function stratCol(name, c, mode, supportsShort) {
     <div class="set-sec">익절</div>
     <div class="fr"><label>익절 사용</label><span>${sw('tp.enabled', c.takeProfit.enabled)}</span></div>
     <div class="fr" data-dep="tp.enabled"><label>익절 %</label>${numIn('tp.pct', c.takeProfit.pct, 1, 'min="0.1"')}</div>
-    <div class="note">${name === 'TREND_RIDER'
+    <div class="note">${name === 'VOL_BREAKOUT'
+      ? '롱: 종가가 당일(UTC 00시) 시가 + k×ATR을 이번 봉에서 새로 돌파하고 추세 EMA 위일 때. 숏은 더 엄격: 시가 − 숏 k×ATR 돌파 + EMA 아래 + EMA가 N봉 전보다 낮을 때만, 숏 최대 보유 별도. 청산: 추적선(최근 N봉 최고가 − ATR×배수) 이탈 또는 최대 보유 봉 수 도달(시간 청산). 손절 = 진입 시 ATR 비상 손절. 알트 전용(BTC·ETH 제외, 거래대금 상위 5개) · 1시간봉 · k3 · 24봉 · 엄격한 숏이 2년 워크포워드와 수수료 2배 테스트를 통과한 설정입니다(오늘 기준 상위 20개 목록이라 종목 선택 편향 있음).'
+      : name === 'TREND_RIDER'
       ? '롱: 종가가 직전 N봉 최고가 돌파 + SMA 위. 숏: 직전 N봉 최저가 이탈 + SMA 아래. 청산(샹들리에): 종가 < 최근 추적 기간 최고가 − ATR×배수 (숏은 최저가 + ATR×배수). 수익이 날수록 청산선이 따라 올라가 추세를 끝까지 탑니다. 손절 = 진입 시 ATR 비상 손절.'
       : name === 'RAYNER'
       ? '롱: 종가 > EMA, EMA 상승(비교 봉 전보다 높음), 히스토그램 > 0 이고 직전 N봉 최대값 × 배수 초과. 숏은 대칭. 구조 손절 = 신호 봉 포함 최근 N봉 최저가(롱)/최고가(숏), 진입 후 고정 (체결가 반대편이면 진입 취소). 청산: 히스토그램이 진입 때 고정한 최근 N봉 최대(롱)/최소(숏)값을 넘으면 익절, 종가가 EMA 반대편이거나 히스토그램 부호가 바뀌면 청산. 같은 추세에서 최대 진입 횟수 제한 (종가가 EMA 반대편에 마감하면 초기화).'
@@ -198,6 +206,7 @@ function readStrategy(col) {
   $$('[name^="p."]', col).forEach((i) => { params[i.name.slice(2)] = i.type === 'checkbox' ? i.checked : i.value; });
   return {
     enabled: chk('enabled'), shortEnabled: chk('shortEnabled'), timeframe: val('timeframe'), leverage: val('leverage'),
+    universe: { topN: val('universe.topN'), excludeMajors: chk('universe.excludeMajors') },
     amounts: { PAPER: { long: val('PAPER.long'), short: val('PAPER.short') ?? 0 }, LIVE: { long: val('LIVE.long'), short: val('LIVE.short') ?? 0 } },
     params,
     stop: { mode: val('stop.mode'), atrPeriod: val('stop.atrPeriod'), atrMult: val('stop.atrMult'), minPct: val('stop.minPct'), maxPct: val('stop.maxPct'), fixedPct: val('stop.fixedPct') },

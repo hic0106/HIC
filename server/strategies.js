@@ -4,7 +4,7 @@
 
 import { sma, ema, atr, adx, priorHigh, priorLow, logMomentum, macd, lowestLow, highestHigh } from './indicators.js';
 
-export const STRATEGIES = ['TURTLE', 'ADX', 'TSMOM', 'RAYNER', 'TREND_RIDER'];
+export const STRATEGIES = ['TURTLE', 'ADX', 'TSMOM', 'RAYNER', 'TREND_RIDER', 'VOL_BREAKOUT'];
 
 export const STRATEGY_META = {
   TURTLE: { label: 'Turtle 20/10', short: 'T', supportsShort: true, exitRule: (p) => `${p.exitPeriod}봉 채널 이탈`,
@@ -21,13 +21,24 @@ export const STRATEGY_META = {
   // Breakout with the big trend, Chandelier trailing exit: losses cut by the initial stop, winners ride until the trail breaks.
   TREND_RIDER: { label: 'Trend Rider', short: 'R', supportsShort: true, resetAfterStop: false,
     exitRule: (p) => `${p.trailPeriod}봉 최고가 − ATR×${p.trailMult} 이탈 (샹들리에)` },
+  // Short-term (단타): intraday volatility breakout with the trend. Cross of UTC-day open ± k × ATR(levelAtr) above/below
+  // EMA(trendPeriod); exit on a short Chandelier trail or after maxHoldBars (TIME_EXIT).
+  VOL_BREAKOUT: { label: 'Vol Breakout', short: 'V', supportsShort: true, resetAfterStop: false,
+    exitRule: (p) => `${p.trailPeriod}봉 추적 ATR×${p.trailMult} 이탈 또는 ${p.maxHoldBars}봉 보유` },
 };
 
 // Exit reason for an emergency stop of the given stop mode.
 export const stopReasonOf = (mode) => (mode === 'FIXED_PERCENT' ? 'FIXED_STOP' : mode === 'STRUCTURE' ? 'STRUCTURE_STOP' : 'ATR_STOP');
 
 // Strategy exit for an open position. Rayner: histogram beyond the target fixed at entry -> RAYNER_HIST_TP.
+// max holding time for a side: a number, or { LONG, SHORT } when the sides differ
+export const holdMsOf = (sig, side) => (sig?.maxHoldMs && typeof sig.maxHoldMs === 'object' ? sig.maxHoldMs[side] : sig?.maxHoldMs);
+
 export function exitFor(name, sig, pos) {
+  // max holding time: counted from the fill (engine: entryTime, backtester: time) to this candle's close
+  const t0 = pos?.entryTime ?? pos?.time;
+  const hold = holdMsOf(sig, pos?.side);
+  if (hold && t0 != null && sig.candleTime + sig.barMs - t0 >= hold) return { exit: true, reason: 'TIME_EXIT' };
   if (name === 'RAYNER' && pos?.histTarget != null && sig.hist != null) {
     if (pos.side === 'LONG' && sig.hist > pos.histTarget) return { exit: true, reason: 'RAYNER_HIST_TP' };
     if (pos.side === 'SHORT' && sig.hist < pos.histTarget) return { exit: true, reason: 'RAYNER_HIST_TP' };
@@ -71,6 +82,7 @@ export function minCandles(name, cfg) {
   if (name === 'TURTLE') return Math.max(p.entryPeriod, p.exitPeriod, p.smaFilter, atrP) + 2;
   if (name === 'ADX') return Math.max(p.adxPeriod * 2 + 2, p.smaFilter, atrP) + 2;
   if (name === 'TSMOM') return Math.max(p.lookback, atrP) + 2;
+  if (name === 'VOL_BREAKOUT') return Math.max(p.levelAtr + 1, p.trailPeriod + 1, p.trendPeriod, atrP) + 2;
   if (name === 'TREND_RIDER') return Math.max(p.entryPeriod, p.trailPeriod + 1, p.smaFilter, atrP) + 2;
   if (name === 'RAYNER') return Math.max(p.emaPeriod + p.slopeLookback, p.slowPeriod + p.signalPeriod + Math.max(p.momentumLookback, p.targetLookback), p.stopLookback, atrP) + 2;
   return 0;
@@ -161,6 +173,35 @@ export function evaluate(name, candles, cfg) {
       histTarget: { LONG: longTarget, SHORT: shortTarget },
       trend: { lastBelow, lastAbove },
       view: { ema: e0, emaRef: eS, hist: h0, longTarget, shortTarget, longStop, shortStop, atr: atrVal },
+    };
+  }
+  if (name === 'VOL_BREAKOUT') {
+    const DAY = 86_400_000;
+    const barMs = k.T - k.t + 1;
+    const lvAtr = atr(candles, p.levelAtr);
+    const dayOpen = (j) => { const d0 = Math.floor(candles[j].t / DAY) * DAY; let m = j; while (m > 0 && candles[m - 1].t >= d0) m--; return candles[m].o; };
+    const a0 = lvAtr[i], a1 = lvAtr[i - 1];
+    const trendArr = p.trendPeriod > 0 ? ema(closes, p.trendPeriod) : null;
+    const trend = trendArr ? trendArr[i] : null;
+    if (a0 == null || a1 == null || (p.trendPeriod > 0 && trend == null)) return { ready: false, reason: 'Vol Breakout warmup' };
+    // short side may be stricter: own k, own holding time, and a falling trend EMA (vs shortSlopeBars ago)
+    const kS = p.shortK ?? p.k;
+    const slopeRef = p.shortSlopeBars > 0 && trendArr ? trendArr[i - p.shortSlopeBars] : null;
+    const falling = !(p.shortSlopeBars > 0) || (slopeRef != null && trend < slopeRef);
+    const o0 = dayOpen(i), o1 = dayOpen(i - 1), prev = candles[i - 1];
+    const up = o0 + p.k * a0, dn = o0 - kS * a0;
+    const trAtr = atr(candles, p.trailPeriod)[i];
+    const longTrail = highestHigh(candles, i, p.trailPeriod) - p.trailMult * trAtr;
+    const shortTrail = lowestLow(candles, i, p.trailPeriod) + p.trailMult * trAtr;
+    return {
+      ready: true, candleTime: k.t, close: k.c, atr: atrVal, barMs,
+      maxHoldMs: { LONG: p.maxHoldBars * barMs, SHORT: (p.shortHoldBars ?? p.maxHoldBars) * barMs },
+      // event: the close crosses the level on this candle; only in the direction of the trend EMA
+      longCond: prev.c <= o1 + p.k * a1 && k.c > up && (trend == null || k.c > trend),
+      shortCond: prev.c >= o1 - kS * a1 && k.c < dn && (trend == null || k.c < trend) && falling,
+      longExit: k.c < longTrail,
+      shortExit: k.c > shortTrail,
+      view: { dayOpen: o0, upper: up, lower: dn, trend, longTrail, shortTrail, atr: atrVal },
     };
   }
   if (name === 'TREND_RIDER') {

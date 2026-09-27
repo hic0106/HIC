@@ -60,7 +60,7 @@ export const DEFAULT_CONFIG = {
     boostRegimes: { LONG: ['BULL_TREND', 'NORMAL'], SHORT: ['BEAR_TREND'] },
     // optional hard maximum USDT per order (null = none)
     maxOrderUsdt: {
-      TURTLE: { LONG: null, SHORT: null }, ADX: { LONG: null, SHORT: null }, TSMOM: { LONG: null, SHORT: null }, RAYNER: { LONG: null, SHORT: null }, TREND_RIDER: { LONG: null, SHORT: null },
+      TURTLE: { LONG: null, SHORT: null }, ADX: { LONG: null, SHORT: null }, TSMOM: { LONG: null, SHORT: null }, RAYNER: { LONG: null, SHORT: null }, TREND_RIDER: { LONG: null, SHORT: null }, VOL_BREAKOUT: { LONG: null, SHORT: null },
       QQQ_EMA_TREND: { LONG: null, SHORT: null }, QQQ_TSMOM: { LONG: null, SHORT: null }, QQQ_SMA200: { LONG: null, SHORT: null }, QQQ_TURTLE_50_20: { LONG: null, SHORT: null },
     },
   },
@@ -69,6 +69,7 @@ export const DEFAULT_CONFIG = {
       enabled: true,
       timeframe: '4h', // signal candles (5m | 4h | 1d); rules unchanged: close vs prior N-bar channel
       shortEnabled: true,
+      universe: { topN: 2, excludeMajors: false }, // new entries only in the top 2 by 24h quote volume (BTC/ETH)
       leverage: 1, amounts: amounts(300, 150),
       params: { entryPeriod: 20, exitPeriod: 10, smaFilter: 200 },
       stop: { mode: 'ATR_DYNAMIC', atrPeriod: 20, atrMult: 2.0, minPct: 8, maxPct: 18, fixedPct: 10 },
@@ -78,6 +79,7 @@ export const DEFAULT_CONFIG = {
       enabled: true,
       timeframe: '4h',
       shortEnabled: true,
+      universe: { topN: 2, excludeMajors: false }, // new entries only in the top 2 by 24h quote volume (BTC/ETH)
       leverage: 1, amounts: amounts(250, 125),
       params: { adxPeriod: 14, threshold: 25, smaFilter: 200 },
       stop: { mode: 'ATR_DYNAMIC', atrPeriod: 14, atrMult: 2.0, minPct: 6, maxPct: 15, fixedPct: 8 },
@@ -87,24 +89,36 @@ export const DEFAULT_CONFIG = {
       enabled: true,
       timeframe: '1d',
       shortEnabled: false,
+      universe: { topN: 2, excludeMajors: false }, // new entries only in the top 2 by 24h quote volume (BTC/ETH)
       leverage: 1, amounts: amounts(250, 0),
       params: { lookback: 30 },
       stop: { mode: 'ATR_DYNAMIC', atrPeriod: 20, atrMult: 3.0, minPct: 10, maxPct: 22, fixedPct: 15 },
       takeProfit: { enabled: false, pct: 40 },
     },
-    // Rayner: EMA50 trend + MACD(1,50,9) histogram acceleration, structure stop, histogram target exit.
-    // Off by default (backtest validation first).
+    // Short-term (단타) Vol Breakout on ALTS (BTC/ETH excluded, top 5 alts by quote volume). Walk-forward 2024-09~2026-09
+    // (1h, k3, hold 24 bars, strict short k5 / 12 bars / EMA falling vs 72 bars): +222%, MDD 17%, IS/OOS Sharpe 2.09/2.47;
+    // 2x fees +172% (1.82/2.11). Alt list = today's top 20 -> survivorship bias remains. Off by default (PAPER first).
+    VOL_BREAKOUT: {
+      enabled: false, timeframe: '1h', shortEnabled: true, leverage: 1, amounts: amounts(100, 100),
+      universe: { topN: 5, excludeMajors: true }, // alts only: BTC/ETH excluded, top 5 alts by 24h quote volume
+      params: { k: 3, levelAtr: 14, trailPeriod: 8, trailMult: 3, maxHoldBars: 24, trendPeriod: 200, shortK: 5, shortHoldBars: 12, shortSlopeBars: 72 },
+      stop: { mode: 'ATR_DYNAMIC', atrPeriod: 14, atrMult: 2, minPct: 1, maxPct: 6, fixedPct: 3 },
+      takeProfit: { enabled: false, pct: 5 },
+    },
     // Trend Rider: N-bar breakout in the SMA200 direction, Chandelier trailing exit (HH(trail) - ATR(trail) x mult).
     // Off by default (backtest validation first).
     TREND_RIDER: {
       enabled: false,
       timeframe: '1d',
       shortEnabled: true,
+      universe: { topN: 2, excludeMajors: false }, // new entries only in the top 2 by 24h quote volume (BTC/ETH)
       leverage: 1, amounts: amounts(200, 100),
       params: { entryPeriod: 20, trailPeriod: 22, trailMult: 3, smaFilter: 200 },
       stop: { mode: 'ATR_DYNAMIC', atrPeriod: 20, atrMult: 2.5, minPct: 8, maxPct: 20, fixedPct: 12 },
       takeProfit: { enabled: false, pct: 50 },
     },
+    // Rayner: EMA50 trend + MACD(1,50,9) histogram acceleration, structure stop, histogram target exit.
+    // Off by default (backtest validation first).
     RAYNER: {
       enabled: false,
       timeframe: '4h',
