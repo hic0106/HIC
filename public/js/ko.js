@@ -8,7 +8,7 @@ export const STATUS = {
   OPEN: '개장', CLOSED: '폐장', OK: '일치', MISMATCH: '불일치', SYNCING: '동기화 중',
 };
 export const EXIT = {
-  STRATEGY_EXIT: '전략 청산', ATR_STOP: 'ATR 손절', FIXED_STOP: '고정 손절', TAKE_PROFIT: '익절',
+  STRATEGY_EXIT: '전략 청산', ATR_STOP: 'ATR 손절', TRAIL_STOP: '트레일링 손절', FIXED_STOP: '고정 손절', TAKE_PROFIT: '익절',
   MANUAL_EXIT: '수동 청산', EXTERNAL_CLOSE: '외부 청산(바이낸스 앱)', EMERGENCY_CLOSE: '전체 비상청산',
   STRUCTURE_STOP: '구조 손절', RAYNER_HIST_TP: '히스토그램 목표 익절', TIME_EXIT: '시간 청산', STOP_INVALID: '손절가 오류 (진입 취소)',
 };

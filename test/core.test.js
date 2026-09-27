@@ -280,6 +280,53 @@ test('live add-on: old Binance stop canceled first, new stop placed for the tota
   assert.equal(pos.adds, 1);
 });
 
+test('trailing stop: break-even after 1 ATR, then peak - 2 ATR, never loosened, exit reason TRAIL_STOP', async () => {
+  const { engine } = newEngine('PAPER');
+  await engine.openPosition('ADX', 'ETHUSDT', 'LONG', { atr: 10 });
+  const pos = engine.slot('ADX', 'ETHUSDT').position;
+  const e = pos.entryPrice, s0 = pos.stopPrice;
+  const tick = (px) => { engine.md.s.ETHUSDT.last = px; engine.lastTickCheck = {}; engine.onPrice('ETHUSDT', px); };
+  tick(e + 5);
+  assert.equal(pos.stopPrice, s0, 'not active below 1 ATR');
+  tick(e + 10);
+  assert.ok(Math.abs(pos.stopPrice - e) < 0.02, 'break-even at 1 ATR');
+  tick(e + 50);
+  assert.ok(Math.abs(pos.stopPrice - (e + 30)) < 0.02, 'peak - 2 ATR');
+  tick(e + 40);
+  assert.ok(Math.abs(pos.stopPrice - (e + 30)) < 0.02, 'never loosened');
+  tick(e + 29);
+  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(engine.slot('ADX', 'ETHUSDT').position, null);
+  assert.equal(engine.ms().trades[0].exitReason, 'TRAIL_STOP');
+  assert.ok(engine.ms().trades[0].grossPnl > 0);
+});
+
+test('trailing stop LIVE: new Binance stop placed first, old one canceled after', async () => {
+  const { engine } = newEngine('LIVE');
+  engine.live = { ...engine.live, status: 'CONNECTED', hedgeMode: true, leverage: { BTCUSDT: 1, ETHUSDT: 1, XRPUSDT: 1 }, account: { equity: 1000, available: 1000 } };
+  const calls = [];
+  engine.liveClient = {
+    hasKeys: () => true,
+    account: async () => ({ totalMarginBalance: '1000', totalWalletBalance: '1000', availableBalance: '1000', totalUnrealizedProfit: '0', positions: [] }),
+    newOrder: async (p) => ({ orderId: 1, status: 'FILLED', avgPrice: '100', executedQty: p.quantity, clientOrderId: p.newClientOrderId }),
+    userTrades: async () => [{ commission: '0.05', commissionAsset: 'USDT' }],
+    newAlgoOrder: async (p) => { calls.push(['place', p.clientAlgoId, Number(p.triggerPrice)]); return { algoId: calls.length }; },
+    cancelAlgoOrder: async (id) => { calls.push(['cancel', id]); return {}; },
+  };
+  await engine.openPosition('ADX', 'XRPUSDT', 'LONG', { atr: 5 });
+  const pos = engine.slot('ADX', 'XRPUSDT').position;
+  pos.exStop.placedAt = 0; // older than the 60 s throttle
+  const first = pos.exStop.clientAlgoId;
+  engine.md.s.XRPUSDT.last = 120; engine.lastTickCheck = {};
+  engine.onPrice('XRPUSDT', 120);
+  await new Promise((r) => setTimeout(r, 0));
+  await new Promise((r) => setTimeout(r, 0));
+  assert.deepEqual(calls.slice(1).map((c) => c[0]), ['place', 'cancel']);
+  assert.equal(calls[2][1], first);
+  assert.equal(calls[1][2], 110);
+  assert.equal(pos.exStop.triggerPrice, 110);
+});
+
 test('emergency stop triggers ATR_STOP exit', async () => {
   const { engine } = newEngine('PAPER');
   await engine.openPosition('TURTLE', 'XRPUSDT', 'SHORT', { atr: 1 });

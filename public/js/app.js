@@ -518,10 +518,45 @@ function renderBottom(force = false) {
   }
 }
 
+// [label, sort value, text filter]; double-click a header: ascending -> descending -> off
+const POS_COLS = [
+  ['전략', (p) => SHORT[p.strategy] || p.strategy, true], ['종목', (p) => p.symbol, true], ['방향', (p) => SIDE[p.side], true],
+  ['진입가', (p) => p.entryPrice], ['현재가(마크)', (p) => p.markPrice], ['주문금액', (p) => p.orderAmount], ['수량', (p) => p.qty],
+  ['현재 가치', (p) => p.currentValue], ['순손익', (p) => p.pnl], ['수익률', (p) => p.pnlPct], ['손절가', (p) => p.stopPrice],
+  ['손절까지', (p) => p.stopDistPct], ['펀딩비', (p) => -(p.funding || 0)], ['보유기간', (p) => p.holdingMs], [''],
+];
+S.posSort = { i: -1, dir: 1 };
+S.posFilter = {};
+
 function renderPositions(s) {
-  if (!s.positions.length) { $('#tab-positions').innerHTML = `<div class="empty">보유 포지션 없음 (${MODE[s.mode]})</div>`; return; }
+  const pane = $('#tab-positions');
+  if (!s.positions.length) { pane.innerHTML = `<div class="empty">보유 포지션 없음 (${MODE[s.mode]})</div>`; return; }
+  // header + filter inputs are built once (keeps typing focus across the 2 s refresh); only body/footer are redrawn
+  if (!pane.querySelector('table')) {
+    pane.innerHTML = `<table class="t pos-t"><thead><tr>${POS_COLS.map(([l, g], i) => `<th data-i="${i}" class="${g ? 'sortable' : ''} ${i < 3 ? 'l' : ''}" title="${g ? '더블 클릭: 정렬' : ''}">${l}</th>`).join('')}</tr>
+      <tr class="pos-filter">${POS_COLS.map(([, , f], i) => `<th class="l">${f ? `<input data-f="${i}" placeholder="필터" value="${esc(S.posFilter[i] || '')}">` : ''}</th>`).join('')}</tr></thead><tbody></tbody><tfoot></tfoot></table>`;
+    pane.querySelector('thead').addEventListener('dblclick', (e) => {
+      const th = e.target.closest('th.sortable');
+      if (!th) return;
+      const i = Number(th.dataset.i);
+      S.posSort = S.posSort.i !== i ? { i, dir: 1 } : S.posSort.dir === 1 ? { i, dir: -1 } : { i: -1, dir: 1 };
+      renderPositions(S.snap);
+    });
+    pane.querySelector('thead').addEventListener('input', (e) => { if (e.target.dataset.f) { S.posFilter[e.target.dataset.f] = e.target.value; renderPositions(S.snap); } });
+  }
+  pane.querySelectorAll('thead tr:first-child th').forEach((th, i) => { th.textContent = POS_COLS[i][0] + (S.posSort.i === i ? (S.posSort.dir > 0 ? ' ▲' : ' ▼') : ''); });
+  let list = s.positions.filter((p) => Object.entries(S.posFilter).every(([i, q]) => !q || String(POS_COLS[i][1](p)).toLowerCase().includes(q.toLowerCase())));
+  if (S.posSort.i >= 0) {
+    const g = POS_COLS[S.posSort.i][1];
+    // text: Korean/alphabet order (numbers inside names compared as numbers); empty values last
+    list = list.slice().sort((a, b) => {
+      const va = g(a), vb = g(b);
+      if (va == null || vb == null) return (va == null) - (vb == null);
+      return (typeof va === 'string' ? va.localeCompare(vb, 'ko', { numeric: true }) : va - vb) * S.posSort.dir;
+    });
+  }
   const f = (sym) => s.symbols[sym].filters;
-  const rows = s.positions.map((p) => `<tr data-sym="${p.symbol}">
+  const rows = list.map((p) => `<tr data-sym="${p.symbol}">
     <td class="l"><b>${SHORT[p.strategy] || p.strategy}</b></td><td class="l">${p.symbol}</td><td class="l side-${p.side}">${SIDE[p.side]}</td>
     <td>${fPrice(p.entryPrice, f(p.symbol))}</td><td>${fPrice(p.markPrice, f(p.symbol))}</td>
     <td>${fNum(p.orderAmount, 2)}${p.ctrlMultiplier != null && p.ctrlMultiplier !== 1 ? ` <span class="warn" title="설정금액 ${fNum(p.baseAmount, 2)} × 자동조절 ${p.ctrlMultiplier}">×${p.ctrlMultiplier}</span>` : ''}</td><td>${p.qty}</td><td>${fNum(p.currentValue, 2)}</td>
@@ -529,9 +564,9 @@ function renderPositions(s) {
     <td class="down">${p.stopPrice ? fPrice(p.stopPrice, f(p.symbol)) : '없음'} ${exBadge(p)}</td><td class="muted">${p.stopDistPct != null ? p.stopDistPct.toFixed(2) + '%' : ''}</td>
     <td>${fNum(p.funding ? -p.funding : 0, 4)}</td><td>${fDur(p.holdingMs)}</td>
     <td><button class="btn small danger" data-close="${p.strategy}:${p.symbol}" ${p.status === 'PENDING' || p.status === 'UNKNOWN' ? 'disabled' : ''}>청산</button></td></tr>`).join('');
-  const tv = s.positions.reduce((a, p) => a + p.currentValue, 0), tp = s.positions.reduce((a, p) => a + p.pnl, 0), ta = s.positions.reduce((a, p) => a + p.orderAmount, 0);
-  $('#tab-positions').innerHTML = `<table class="t"><thead><tr><th>전략</th><th>종목</th><th>방향</th><th>진입가</th><th>현재가(마크)</th><th>주문금액</th><th>수량</th><th>현재 가치</th><th>순손익</th><th>수익률</th><th>손절가</th><th>손절까지</th><th>펀딩비</th><th>보유기간</th><th></th></tr></thead>
-    <tbody>${rows}</tbody><tfoot><tr><td>합계</td><td></td><td></td><td></td><td></td><td>${fNum(ta, 2)}</td><td></td><td>${fNum(tv, 2)}</td><td class="${cls(tp)}">${fSigned(tp)}</td><td></td><td></td><td></td><td></td><td></td><td></td></tr></tfoot></table>`;
+  const tv = list.reduce((a, p) => a + p.currentValue, 0), tp = list.reduce((a, p) => a + p.pnl, 0), ta = list.reduce((a, p) => a + p.orderAmount, 0);
+  pane.querySelector('tbody').innerHTML = rows || `<tr><td class="l muted" colspan="${POS_COLS.length}">필터에 맞는 포지션 없음</td></tr>`;
+  pane.querySelector('tfoot').innerHTML = `<tr><td>합계${list.length < s.positions.length ? ` (${list.length}/${s.positions.length})` : ''}</td><td></td><td></td><td></td><td></td><td>${fNum(ta, 2)}</td><td></td><td>${fNum(tv, 2)}</td><td class="${cls(tp)}">${fSigned(tp)}</td><td></td><td></td><td></td><td></td><td></td><td></td></tr>`;
 }
 
 function exBadge(p) {

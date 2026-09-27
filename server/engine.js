@@ -806,7 +806,7 @@ export class Engine {
       if (now - (slot.lastStopTry || 0) < 5000) continue; // throttle retries of failed stop closes
       const d = dirOf(pos.side);
       if (pos.stopPrice != null && (price - pos.stopPrice) * d <= 0) {
-        const reason = stopReasonOf(pos.stopMode);
+        const reason = pos.trailing ? 'TRAIL_STOP' : stopReasonOf(pos.stopMode);
         if (this.mode === 'LIVE' && pos.exStop?.status === 'NEW') {
           // Binance holds the stop: give it time to fill, then fall back to a bot market close.
           pos.breachAt ||= now;
@@ -823,7 +823,52 @@ export class Engine {
         this.closePosition(st, symbol, 'TAKE_PROFIT');
       } else {
         pos.breachAt = null;
+        this.trailStop(slot, price);
       }
+    }
+  }
+
+  // Trailing stop (general.trailing): after the price moved activateAtr x ATR(entry) in favour, the stop follows the
+  // best price at trailAtr x ATR, never below break-even, never loosened. Bot-side stop moves on every tick; the
+  // Binance stop is re-placed at most once a minute (new one placed first, then the old one canceled).
+  trailStop(slot, price) {
+    const tr = this.cfg.general.trailing;
+    const pos = slot.position;
+    const unit = pos.atrAtEntry; // ATR of the strategy's candle at entry
+    if (!tr?.enabled || !(unit > 0) || pos.stopPrice == null || pos.stopInvalid) return;
+    const d = dirOf(pos.side);
+    pos.peak = d > 0 ? Math.max(pos.peak ?? pos.entryPrice, price) : Math.min(pos.peak ?? pos.entryPrice, price);
+    if ((pos.peak - pos.entryPrice) * d < tr.activateAtr * unit) return;
+    const raw = d > 0 ? Math.max(pos.entryPrice, pos.peak - tr.trailAtr * unit) : Math.min(pos.entryPrice, pos.peak + tr.trailAtr * unit);
+    const ns = roundToTick(raw, this.md.filters[slot.symbol]?.tickSize || 0);
+    if ((ns - pos.stopPrice) * d <= 0) return;
+    if (!pos.trailing) this.log.trade(`${slot.strategy} ${slot.symbol.replace('USDT', '')} ${pos.side} trailing stop active (best ${pos.peak}) — stop ${pos.stopPrice.toPrecision(6)} → ${ns.toPrecision(6)}`, 'TRAIL_STOP');
+    pos.stopPrice = ns;
+    pos.trailing = true;
+    const ex = pos.exStop;
+    if (this.mode === 'LIVE' && ex?.status === 'NEW' && Date.now() - (pos.exMovedAt || ex.placedAt || 0) >= 60_000 && (ns - ex.triggerPrice) * d > 0) this.moveExchangeStop(slot);
+  }
+
+  async moveExchangeStop(slot) {
+    const key = slotKey(slot.strategy, slot.symbol);
+    if (this.busy.has(key) || slot.pending) return;
+    this.busy.add(key);
+    const pos = slot.position;
+    const old = pos.exStop;
+    const tag = `${slot.strategy} ${slot.symbol.replace('USDT', '')}`;
+    try {
+      pos.exMovedAt = Date.now();
+      pos.exStop = null;
+      await this.placeExchangeStop(slot);
+      if (pos.exStop?.status !== 'NEW') {
+        // new stop not confirmed: keep tracking the old one (a pending UNKNOWN one is logged by placeExchangeStop)
+        if (pos.exStop?.status === 'FAILED' || !pos.exStop) pos.exStop = old;
+        return;
+      }
+      try { await this.liveClient.cancelAlgoOrder(old.clientAlgoId); } catch (e) { this.log.warn(`${tag} old Binance stop ${old.clientAlgoId} not canceled (${e.message}) — it sits below the new stop`, 'EXCHANGE_STOP'); }
+    } finally {
+      this.busy.delete(key);
+      this.store.saveState();
     }
   }
 
@@ -899,7 +944,7 @@ export class Engine {
     const terminal = ['FILLED', 'CANCELED', 'EXPIRED', 'REJECTED', 'EXPIRED_IN_MATCH'].includes(r.status);
     if (!terminal) return 'WORKING';
     if (executed <= 0) return 'NONE';
-    const reason = stopReasonOf(pos.stopMode);
+    const reason = pos.trailing ? 'TRAIL_STOP' : stopReasonOf(pos.stopMode);
     const ms = this.ms('LIVE');
     const order = { id: ex.clientAlgoId, clientOrderId: ex.clientAlgoId, time: Date.now(), mode: 'LIVE', strategy: slot.strategy, symbol: slot.symbol, action: 'CLOSE', positionSide: pos.side, side: pos.side === 'LONG' ? 'SELL' : 'BUY', type: 'STOP_MARKET', refPrice: ex.triggerPrice, price: null, amount: round(executed * Number(r.avgPrice || ex.triggerPrice), 2), qty: executed, status: 'SUBMITTED', reason, exchangeOrderId: r.orderId, fee: null };
     ms.orders.unshift(order);

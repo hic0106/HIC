@@ -42,6 +42,10 @@
 
 Stop은 ATR_DYNAMIC(min/max 클램프), LIVE에서는 Binance Algo STOP_MARKET로 등록. Take Profit은 봇이 감시.
 
+트레일링 스탑(`general.trailing`, 기본 켜짐): 진입 ATR 기준, 유리한 방향 1 ATR 도달 시 손절을 본전으로, 이후 최고가 − 2 ATR로 따라감(느슨해지지 않음). 봇 손절은 틱마다, Binance Stop은 최대 1분에 1회 새 Stop 등록 후 기존 취소. 청산 사유 TRAIL_STOP. 백테스트 미반영.
+
+보유 포지션 표: 헤더 더블 클릭 정렬(오름→내림→해제, 한글/영문 localeCompare 'ko'), 전략·종목·방향 텍스트 필터.
+
 ## 구성 요소 요약
 
 - `server/portfolio/portfolioService.js`: 선물 지갑 전 자산(USDT 환산, `/fapi/v2/ticker/price`) + Binance 전체 지갑(`/sapi/v1/asset/wallet/balance`, 읽기 권한) 표시.
