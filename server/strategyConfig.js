@@ -11,6 +11,9 @@ export const num = (v, { min = -Infinity, max = Infinity, int = false } = {}) =>
 // STRUCTURE (swing low / high stop) needs a strategy that reports sig.structStop (Rayner).
 export const stopModesFor = (name) => (STRATEGY_META[name]?.stopModes ? [...STRATEGY_META[name].stopModes, 'ATR_DYNAMIC', 'FIXED_PERCENT', 'OFF'] : ['ATR_DYNAMIC', 'FIXED_PERCENT', 'OFF']);
 
+// add-on entries per position: strategies.<name>.maxAdds, null = general.maxAdds
+export const maxAddsFor = (scfg, g) => scfg?.maxAdds ?? g?.maxAdds ?? 0;
+
 // b = submitted settings, cur = current stored settings. Returns the validated next settings (throws on error).
 export function validateStrategySettings(name, b, cur) {
   const amt = (x) => num(x, { min: 0, max: 1e7 });
@@ -19,6 +22,7 @@ export function validateStrategySettings(name, b, cur) {
     ...(STRATEGY_CLASS[name] === 'CRYPTO' ? { timeframe: CRYPTO_TIMEFRAME_CHOICES.includes(b.timeframe) ? b.timeframe : (cur.timeframe || '1d') } : {}),
     shortEnabled: STRATEGY_META[name].supportsShort ? !!b.shortEnabled : false,
     leverage: num(b.leverage ?? cur.leverage ?? 1, { min: 1, max: STRATEGY_CLASS[name] === 'CRYPTO' ? 20 : 10, int: true }),
+    maxAdds: ((m) => (m === '' || m == null ? null : num(m, { min: 0, max: 5, int: true })))('maxAdds' in b ? b.maxAdds : cur.maxAdds),
     amounts: {
       PAPER: { long: amt(b.amounts.PAPER.long), short: amt(b.amounts.PAPER.short ?? 0) },
       LIVE: { long: amt(b.amounts.LIVE.long), short: amt(b.amounts.LIVE.short ?? 0) },

@@ -96,6 +96,7 @@ function stratCol(name, c, mode, supportsShort) {
     <div class="fr amt" data-dep="shortEnabled"><label>숏 주문금액</label>${numIn('PAPER.short', a.PAPER.short, 1, `min="0" class="${act('PAPER')}"`)}${numIn('LIVE.short', a.LIVE.short, 1, `min="0" class="${act('LIVE')}"`)}</div>`
       : '<div class="fr"><label>숏</label><span class="muted" style="text-align:right">없음 (롱 / 현금 전략)</span></div>'}
     <div class="fr"><label>레버리지 (배)</label>${numIn('leverage', c.leverage ?? 1, 1, `min="1" max="${c.timeframe ? 20 : 10}"`)}</div>
+    <div class="fr"><label>추가 매수 최대 횟수 (빈칸 = 공통)</label>${numIn('maxAdds', c.maxAdds ?? '', 1, 'min="0" max="5" placeholder="공통"')}</div>
     <div class="note">포지션 규모 = 주문금액 × 레버리지. 같은 종목의 거래소 레버리지는 켜진 전략 중 가장 높은 값으로 설정. 변경은 봇 정지 상태에서만 가능.</div>
     ${c.timeframe ? `<div class="set-sec">신호 캔들</div>
     <div class="fr"><label>캔들 (마감 기준)</label><select name="timeframe">${(S_META.timeframeChoices || ['5m', '4h', '1d']).map((t) => `<option value="${t}" ${t === c.timeframe ? 'selected' : ''}>${TF[t]}</option>`).join('')}</select></div>
@@ -145,8 +146,8 @@ function generalCol(g) {
     <div class="fr"><label>봇 정지 중에도 손절</label><span>${sw('stopsActiveWhenStopped', g.stopsActiveWhenStopped, ['작동', '꺼짐'])}</span></div>
     <div class="fr"><label>시세 지연 한도 (초)</label>${numIn('dataStaleSec', g.dataStaleSec, 1, 'min="5"')}</div>
     <div class="fr"><label>잔고 여유분 %</label>${numIn('balanceBufferPct', g.balanceBufferPct, 0.5, 'min="0"')}</div>
-    <div class="set-sec">추가 매수 · 트레일링 스탑 (전 전략)</div>
-    <div class="fr"><label>추가 매수 최대 횟수 (0 = 끔)</label>${numIn('maxAdds', g.maxAdds ?? 0, 1, 'min="0" max="5"')}</div>
+    <div class="set-sec">추가 매수 · 트레일링 스탑</div>
+    <div class="fr"><label>추가 매수 최대 횟수 (0 = 끔, 전략별 빈칸일 때)</label>${numIn('maxAdds', g.maxAdds ?? 0, 1, 'min="0" max="5"')}</div>
     <div class="fr"><label>트레일링 스탑</label><span>${sw('trailingEnabled', !!g.trailing?.enabled)}</span></div>
     <div class="fr" data-dep="trailingEnabled"><label>시작: 수익 ATR 배수</label>${numIn('trailingActivateAtr', g.trailing?.activateAtr ?? 4, 0.5, 'min="0.5"')}</div>
     <div class="fr" data-dep="trailingEnabled"><label>간격: 최고가 − ATR 배수</label>${numIn('trailingTrailAtr', g.trailing?.trailAtr ?? 6, 0.5, 'min="0.5"')}</div>
@@ -212,7 +213,7 @@ function readStrategy(col) {
   const params = {};
   $$('[name^="p."]', col).forEach((i) => { params[i.name.slice(2)] = i.type === 'checkbox' ? i.checked : i.value; });
   return {
-    enabled: chk('enabled'), shortEnabled: chk('shortEnabled'), timeframe: val('timeframe'), leverage: val('leverage'),
+    enabled: chk('enabled'), shortEnabled: chk('shortEnabled'), timeframe: val('timeframe'), leverage: val('leverage'), maxAdds: val('maxAdds'),
     universe: { topN: val('universe.topN'), excludeMajors: chk('universe.excludeMajors') },
     amounts: { PAPER: { long: val('PAPER.long'), short: val('PAPER.short') ?? 0 }, LIVE: { long: val('LIVE.long'), short: val('LIVE.short') ?? 0 } },
     params,

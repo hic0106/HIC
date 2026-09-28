@@ -14,6 +14,7 @@ const { floorToStep, BinanceError, parseJson } = await import('../server/binance
 const { Store, DEFAULT_CONFIG } = await import('../server/store.js');
 const { Logger } = await import('../server/logger.js');
 const { Engine } = await import('../server/engine.js');
+const { validateStrategySettings } = await import('../server/strategyConfig.js');
 
 const DAY = 86_400_000;
 const mk = (closes, spread = 0.01) => closes.map((c, i) => ({ t: i * DAY, o: c, h: c * (1 + spread), l: c * (1 - spread), c, v: 1 }));
@@ -255,6 +256,20 @@ test('add-on entries: signal again while holding adds up to general.maxAdds, avg
   assert.equal(pos.adds, 2);
   engine.cfg.general.maxAdds = 0;
   assert.equal(await run(4), 'HOLD');
+  engine.cfg.strategies.TSMOM.maxAdds = 3; // per-strategy override beats general
+  assert.equal(await run(5), 'ADD LONG');
+  engine.cfg.strategies.TSMOM.maxAdds = 0;
+  engine.cfg.general.maxAdds = 5;
+  assert.equal(await run(6), 'HOLD', 'strategy 0 = off even when general allows add-ons');
+});
+
+test('validateStrategySettings: maxAdds blank = null (general), kept when not submitted', () => {
+  const cur = structuredClone(DEFAULT_CONFIG.strategies.TSMOM);
+  assert.equal(validateStrategySettings('TSMOM', { ...cur, maxAdds: '' }, cur).maxAdds, null);
+  assert.equal(validateStrategySettings('TSMOM', { ...cur, maxAdds: '2' }, cur).maxAdds, 2);
+  const { maxAdds, ...noField } = { ...cur, maxAdds: 1 };
+  assert.equal(validateStrategySettings('TSMOM', noField, { ...cur, maxAdds: 1 }).maxAdds, 1);
+  assert.throws(() => validateStrategySettings('TSMOM', { ...cur, maxAdds: 9 }, cur));
 });
 
 test('live add-on: old Binance stop canceled first, new stop placed for the total qty', async () => {
