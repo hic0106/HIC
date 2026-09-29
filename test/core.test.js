@@ -265,6 +265,11 @@ test('add-on entries: signal again while holding adds up to general.maxAdds, avg
 
 test('validateStrategySettings: maxAdds blank = null (general), kept when not submitted', () => {
   const cur = structuredClone(DEFAULT_CONFIG.strategies.TSMOM);
+  assert.equal(validateStrategySettings('TSMOM', { ...cur, trailing: { mode: 'COMMON' } }, cur).trailing, null);
+  assert.deepEqual(validateStrategySettings('TSMOM', { ...cur, trailing: { mode: 'OFF', activateAtr: '', trailAtr: '' } }, cur).trailing, { enabled: false, activateAtr: 4, trailAtr: 6 });
+  assert.deepEqual(validateStrategySettings('TSMOM', { ...cur, trailing: { mode: 'ON', activateAtr: '2', trailAtr: '6' } }, cur).trailing, { enabled: true, activateAtr: 2, trailAtr: 6 });
+  const t = { enabled: true, activateAtr: 3, trailAtr: 5 };
+  assert.deepEqual(validateStrategySettings('TSMOM', cur, { ...cur, trailing: t }).trailing, t, 'kept when not submitted (AI apply path)');
   assert.equal(validateStrategySettings('TSMOM', { ...cur, maxAdds: '' }, cur).maxAdds, null);
   assert.equal(validateStrategySettings('TSMOM', { ...cur, maxAdds: '2' }, cur).maxAdds, 2);
   const { maxAdds, ...noField } = { ...cur, maxAdds: 1 };

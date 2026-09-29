@@ -7,7 +7,7 @@ import { SYMBOL_META, assetClassOf, ASSET_CLASSES } from './assets.js';
 import { EventEmitter } from 'node:events';
 import { barsFor } from './scheduler/timeframes.js';
 import { reconcilePositions } from './portfolio/reconcile.js';
-import { maxAddsFor } from './strategyConfig.js';
+import { maxAddsFor, trailingFor } from './strategyConfig.js';
 
 const slotKey = (st, sym) => `${st}:${sym}`;
 const dirOf = (side) => (side === 'LONG' ? 1 : -1);
@@ -832,11 +832,11 @@ export class Engine {
     }
   }
 
-  // Trailing stop (general.trailing): after the price moved activateAtr x ATR(entry) in favour, the stop follows the
+  // Trailing stop (strategies.<name>.trailing, else general.trailing): after the price moved activateAtr x ATR(entry) in favour, the stop follows the
   // best price at trailAtr x ATR, never below break-even, never loosened. Bot-side stop moves on every tick; the
   // Binance stop is re-placed at most once a minute (new one placed first, then the old one canceled).
   trailStop(slot, price) {
-    const tr = this.cfg.general.trailing;
+    const tr = trailingFor(this.cfg.strategies[slot.strategy], this.cfg.general);
     const pos = slot.position;
     const unit = pos.atrAtEntry; // ATR of the strategy's candle at entry
     if (!tr?.enabled || STRATEGY_META[slot.strategy]?.noTrail || !(unit > 0) || pos.stopPrice == null || pos.stopInvalid) return;

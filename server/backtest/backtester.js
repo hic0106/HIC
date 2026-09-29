@@ -12,7 +12,7 @@
 //     fixed at entry (RAYNER_HIST_TP), at most maxEntriesPerTrend entries per side until a close across the EMA
 //   - add-on entries (strategies.<name>.maxAdds, else general.maxAdds): entry condition again while holding -> add one slot allocation at the next open
 //     (average entry, stop recomputed from the add-on fill and only tightened), at most maxAdds per position
-//   - trailing stop (general.trailing): after activateAtr x ATR(entry) in favour the stop follows the best price at
+//   - trailing stop (strategies.<name>.trailing, else general.trailing): after activateAtr x ATR(entry) in favour the stop follows the best price at
 //     trailAtr x ATR, never below break-even. Per bar: stop checked first with the stop from earlier bars, then the bar's
 //     favourable extreme ratchets the stop; a close beyond that new stop exits at the stop (the extreme came before the close)
 //   - dynamic crypto universe (optional tradeFilter(symbol, signalTime)): new entries only when the symbol was in the
@@ -22,7 +22,7 @@
 // `slots` positions are open at once. 1x notional, no leverage.
 import { META, evaluateStrategy, symbolsForStrategy, exitFor, entryStop, stopReasonOf, trendCounts, recordTrendEntry } from '../strategyRegistry.js';
 import { timeframeOf, US_SESSION } from '../scheduler/timeframes.js';
-import { maxAddsFor } from '../strategyConfig.js';
+import { maxAddsFor, trailingFor } from '../strategyConfig.js';
 
 // indicator window = what the live market data keeps: 1000 bars per interval, 500 daily
 export const LIVE_WINDOW = new Proxy({ '1d': 500, [US_SESSION]: Infinity }, { get: (o, k) => (k in o ? o[k] : 1000) });
@@ -39,7 +39,8 @@ export async function backtestStrategy({ strategy, config, data, funding = {}, s
   const useFunding = !!g.includeFunding;
   const meta = custom ? custom.meta : META[strategy];
   const maxAdds = meta?.noAdds ? 0 : maxAddsFor(scfg, g);
-  const trail = g.trailing?.enabled && !meta?.noTrail ? g.trailing : null;
+  const tcfg = trailingFor(custom ? null : scfg, g);
+  const trail = tcfg?.enabled && !meta?.noTrail ? tcfg : null;
   const n = Math.max(1, Math.min(symbols.length, slots > 0 ? slots : symbols.length));
   const capSlots = n < symbols.length; // more watched symbols than slots: limit concurrent positions
 

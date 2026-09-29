@@ -13,6 +13,14 @@ export const stopModesFor = (name) => (STRATEGY_META[name]?.stopModes ? [...STRA
 
 // add-on entries per position: strategies.<name>.maxAdds, null = general.maxAdds
 export const maxAddsFor = (scfg, g) => scfg?.maxAdds ?? g?.maxAdds ?? 0;
+// trailing stop: strategies.<name>.trailing ({ enabled, activateAtr, trailAtr }), null = general.trailing
+export const trailingFor = (scfg, g) => scfg?.trailing ?? g?.trailing ?? null;
+// submitted { mode: 'COMMON' | 'OFF' | 'ON', activateAtr, trailAtr } (settings form) or a stored object / null
+const parseTrailing = (t) => {
+  if (t == null || t.mode === 'COMMON' || t.mode === '') return null;
+  const atr = (v, d) => num(v === '' || v == null ? d : v, { min: 0.5, max: 20 });
+  return { enabled: t.mode ? t.mode === 'ON' : !!t.enabled, activateAtr: atr(t.activateAtr, 4), trailAtr: atr(t.trailAtr, 6) };
+};
 
 // b = submitted settings, cur = current stored settings. Returns the validated next settings (throws on error).
 export function validateStrategySettings(name, b, cur) {
@@ -23,6 +31,7 @@ export function validateStrategySettings(name, b, cur) {
     shortEnabled: STRATEGY_META[name].supportsShort ? !!b.shortEnabled : false,
     leverage: num(b.leverage ?? cur.leverage ?? 1, { min: 1, max: STRATEGY_CLASS[name] === 'CRYPTO' ? 20 : 10, int: true }),
     maxAdds: ((m) => (m === '' || m == null ? null : num(m, { min: 0, max: 5, int: true })))('maxAdds' in b ? b.maxAdds : cur.maxAdds),
+    trailing: parseTrailing('trailing' in b ? b.trailing : cur.trailing),
     amounts: {
       PAPER: { long: amt(b.amounts.PAPER.long), short: amt(b.amounts.PAPER.short ?? 0) },
       LIVE: { long: amt(b.amounts.LIVE.long), short: amt(b.amounts.LIVE.short ?? 0) },

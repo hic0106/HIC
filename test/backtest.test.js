@@ -77,6 +77,9 @@ test('backtest: trailing stop ratchets on the bar extreme; close beyond the new 
   assert.ok(t, 'trailing stop exit');
   assert.ok(Math.abs(t.exitPrice - (200 - 2 * atr) * (1 - 0.0005)) < 1e-6);
   assert.ok(t.gross > 0, 'profit kept');
+  c.strategies.TSMOM.trailing = { enabled: false, activateAtr: 1, trailAtr: 2 }; // per-strategy override: off
+  const r2 = await backtestStrategy({ strategy: 'TSMOM', config: c, data: { BTCUSDT: bars }, start: 79 * DAY, end: 82 * DAY, capital: 1_000_000, symbols: ['BTCUSDT'] });
+  assert.ok(!r2.trades.some((x) => x.reason === 'TRAIL_STOP'), 'strategy trailing off beats general');
 });
 
 test('backtest: compound vs fixed sizing, equity accounting consistent', async () => {

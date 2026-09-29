@@ -98,6 +98,8 @@ function stratCol(name, c, mode, supportsShort) {
       : '<div class="fr"><label>숏</label><span class="muted" style="text-align:right">없음 (롱 / 현금 전략)</span></div>'}
     <div class="fr"><label>레버리지 (배)</label>${numIn('leverage', c.leverage ?? 1, 1, `min="1" max="${c.timeframe ? 20 : 10}"`)}</div>
     <div class="fr"><label>추가 매수 최대 횟수 (빈칸 = 공통)</label>${numIn('maxAdds', c.maxAdds ?? '', 1, 'min="0" max="5" placeholder="공통"')}</div>
+    <div class="fr"><label>트레일링 스탑</label><select name="trailing.mode">${[['COMMON', '공통 설정'], ['ON', '사용'], ['OFF', '끔']].map(([k, t]) => `<option value="${k}" ${k === (c.trailing ? (c.trailing.enabled ? 'ON' : 'OFF') : 'COMMON') ? 'selected' : ''}>${t}</option>`).join('')}</select></div>
+    <div class="fr amt"><label>트레일링 시작 / 간격 (ATR)</label>${numIn('trailing.activateAtr', c.trailing?.activateAtr ?? '', 0.5, 'min="0.5" placeholder="4"')}${numIn('trailing.trailAtr', c.trailing?.trailAtr ?? '', 0.5, 'min="0.5" placeholder="6"')}</div>
     <div class="note">포지션 규모 = 주문금액 × 레버리지. 같은 종목의 거래소 레버리지는 켜진 전략 중 가장 높은 값으로 설정. 변경은 봇 정지 상태에서만 가능.</div>
     ${c.timeframe ? `<div class="set-sec">신호 캔들</div>
     <div class="fr"><label>캔들 (마감 기준)</label><select name="timeframe">${(S_META.timeframeChoices || ['5m', '4h', '1d']).map((t) => `<option value="${t}" ${t === c.timeframe ? 'selected' : ''}>${TF[t]}</option>`).join('')}</select></div>
@@ -152,7 +154,7 @@ function generalCol(g) {
     <div class="fr"><label>잔고 여유분 %</label>${numIn('balanceBufferPct', g.balanceBufferPct, 0.5, 'min="0"')}</div>
     <div class="set-sec">추가 매수 · 트레일링 스탑</div>
     <div class="fr"><label>추가 매수 최대 횟수 (0 = 끔, 전략별 빈칸일 때)</label>${numIn('maxAdds', g.maxAdds ?? 0, 1, 'min="0" max="5"')}</div>
-    <div class="fr"><label>트레일링 스탑</label><span>${sw('trailingEnabled', !!g.trailing?.enabled)}</span></div>
+    <div class="fr"><label>트레일링 스탑 (전략별 공통 설정일 때)</label><span>${sw('trailingEnabled', !!g.trailing?.enabled)}</span></div>
     <div class="fr" data-dep="trailingEnabled"><label>시작: 수익 ATR 배수</label>${numIn('trailingActivateAtr', g.trailing?.activateAtr ?? 4, 0.5, 'min="0.5"')}</div>
     <div class="fr" data-dep="trailingEnabled"><label>간격: 최고가 − ATR 배수</label>${numIn('trailingTrailAtr', g.trailing?.trailAtr ?? 6, 0.5, 'min="0.5"')}</div>
     <div class="note">트레일링: 진입 ATR 기준, 시작 배수만큼 수익이면 손절을 본전으로 올리고 이후 최고가 − 간격을 따라감. 백테스트에도 반영.</div>
@@ -218,6 +220,7 @@ function readStrategy(col) {
   $$('[name^="p."]', col).forEach((i) => { params[i.name.slice(2)] = i.type === 'checkbox' ? i.checked : i.value; });
   return {
     enabled: chk('enabled'), shortEnabled: chk('shortEnabled'), timeframe: val('timeframe'), leverage: val('leverage'), maxAdds: val('maxAdds'),
+    trailing: { mode: val('trailing.mode'), activateAtr: val('trailing.activateAtr'), trailAtr: val('trailing.trailAtr') },
     universe: { topN: val('universe.topN'), excludeMajors: chk('universe.excludeMajors') },
     amounts: { PAPER: { long: val('PAPER.long'), short: val('PAPER.short') ?? 0 }, LIVE: { long: val('LIVE.long'), short: val('LIVE.short') ?? 0 } },
     params,
