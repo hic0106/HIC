@@ -96,7 +96,7 @@ export class ShadowPortfolio {
       side, entryPrice: entry, entryTime: now,
       stopPrice: es.stopPrice,
       stopMode: scfg.stop.mode, histTarget: sig?.histTarget?.[side] ?? null,
-      tpPrice: scfg.takeProfit.enabled ? entry * (1 + dirOf(side) * scfg.takeProfit.pct / 100) : null,
+      tpPrice: sig?.tpTarget?.[side] ?? (scfg.takeProfit.enabled ? entry * (1 + dirOf(side) * scfg.takeProfit.pct / 100) : null),
       baseAmount, mult, fee, funding: 0,
     };
   }

@@ -9,8 +9,8 @@ import { mountPortfolio, update as updatePortfolio } from './portfolio.js';
 import { mountBacktest } from './backtest.js';
 import { SIDE, MODE, STATUS, EXIT, ORDER_STATUS, STRAT, TF, sigKo } from './ko.js';
 
-const SHORT = { TURTLE: '터틀', ADX: 'ADX', TSMOM: 'TSMOM', RAYNER: 'Rayner', TREND_RIDER: '추세 라이더', VOL_BREAKOUT: '단타 돌파', QQQ_EMA_TREND: 'QQQ EMA 추세', QQQ_TSMOM: 'QQQ TSMOM', QQQ_SMA200: 'QQQ SMA200', QQQ_TURTLE_50_20: 'QQQ 터틀 50/20' };
-const CHIP = { TURTLE: '터틀', ADX: 'ADX', TSMOM: 'TSM', RAYNER: 'RAY', TREND_RIDER: 'RDR', VOL_BREAKOUT: 'VBO', QQQ_EMA_TREND: 'EMA', QQQ_TSMOM: 'TSM', QQQ_SMA200: 'SMA', QQQ_TURTLE_50_20: 'T50' };
+const SHORT = { TURTLE: '터틀', ADX: 'ADX', TSMOM: 'TSMOM', RAYNER: 'Rayner', TREND_RIDER: '추세 라이더', VOL_BREAKOUT: '단타 돌파', MA_PULLBACK: '눌림목', QQQ_EMA_TREND: 'QQQ EMA 추세', QQQ_TSMOM: 'QQQ TSMOM', QQQ_SMA200: 'QQQ SMA200', QQQ_TURTLE_50_20: 'QQQ 터틀 50/20' };
+const CHIP = { TURTLE: '터틀', ADX: 'ADX', TSMOM: 'TSM', RAYNER: 'RAY', TREND_RIDER: 'RDR', VOL_BREAKOUT: 'VBO', MA_PULLBACK: 'PUL', QQQ_EMA_TREND: 'EMA', QQQ_TSMOM: 'TSM', QQQ_SMA200: 'SMA', QQQ_TURTLE_50_20: 'T50' };
 const stratsOf = (sym) => S.meta.strategiesBySymbol[sym] || [];
 const classOf = (sym) => S.meta.symbolMeta[sym]?.asset_class || 'CRYPTO';
 const isLongOnly = (st) => !S.meta.supportsShort[st];
@@ -391,6 +391,13 @@ function stratCard(s, st, sym, f) {
     add('SMA200', fPrice(v.sma, f), v.sma && s.symbols[sym].price < v.sma ? 'down' : 'up');
   } else if (st === 'TSMOM') {
     add('30일 모멘텀', v.momentumPct != null ? fPct(v.momentumPct) : '—', cls(v.momentumPct));
+  } else if (st === 'MA_PULLBACK') {
+    const pp = cfg.params;
+    add(`EMA${pp.emaFast} / SMA${pp.smaMid}`, `${fPrice(v.ema9, f)} / ${fPrice(v.sma20, f)}`, v.sma20Up ? 'up' : 'down');
+    add(`SMA${pp.smaTrend}`, fPrice(v.sma200, f), v.sma200 && s.symbols[sym].price < v.sma200 ? 'down' : 'up');
+    add(`SMA${pp.smaMid} 방향`, v.sma20Up == null ? '—' : v.sma20Up ? '상승' : '하락', v.sma20Up ? 'up' : 'down');
+    if (p) add('목표가 (고정)', fPrice(p.tpPrice, f), 'up');
+    else add(`직전봉 기준 손절/목표 (롱)`, `${fPrice(v.longStop, f)} / ${fPrice(v.longTp, f)}`);
   } else if (st === 'VOL_BREAKOUT') {
     const pp = cfg.params;
     add('당일 시가 (UTC)', fPrice(v.dayOpen, f));

@@ -16,6 +16,7 @@ EXECUTION → Binance Futures
 | TSMOM 30D (1D) | Long + Cash | 30일 누적 로그수익률 > 0 | 30일 모멘텀 <= 0 | ATR(20)×3.0, 10~22% |
 | RAYNER (4H, 기본 OFF) | Long + Short | 종가 > EMA50, EMA50[0] > EMA50[3], MACD(1,50,9) Hist > 0 이고 Hist[0] > max(Hist[1..3]) × 1.5 (Short 대칭: < min × 1.5) · 추세당 최대 2회 | 히스토그램이 진입 때 고정한 최근 25봉 최대(Long)/최소(Short) 초과 → `RAYNER_HIST_TP`, 종가가 EMA50 반대편 또는 Hist 부호 반대 → 전략 청산 | STRUCTURE: 신호 봉 포함 최근 10봉 최저가(Long)/최고가(Short), 진입 후 고정 (`STRUCTURE_STOP`) |
 
+- MA_PULLBACK (1H, 기본 OFF): TradingView "이동평균선 눌림목 매매법 (9 EMA & 20/200 SMA)" 이식. 롱 = 종가 > SMA200, SMA20 상승, 저가 ≤ SMA20 < 종가, 양봉(숏 대칭). 손절 신호봉 저가/고가, 목표 = 종가 ± 2 × 손절폭(고정). 손절·목표로만 청산(트레일링·추가 매수 적용 안 함). 체결은 다음 봉 시가.
 - 채널 계산에서 현재 봉은 제외합니다. 신호는 전략별 Timeframe의 **마감된 캔들**로만 평가합니다: Turtle·ADX = 4H (KST 01·05·09·13·17·21시 마감), TSMOM = 1D (UTC 00:00 = KST 09:00), QQQ = 미국 정규장 마감(America/New_York). 아래 [StrategyScheduler](#strategyscheduler) 참고.
 - Emergency Stop은 실시간 가격으로 감시하며, 전략 Exit와 Stop 중 먼저 발생한 조건으로 청산합니다.
 - 고정 Take Profit은 기본 OFF (전략별로 켤 수 있음).

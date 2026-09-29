@@ -8,7 +8,7 @@
 - 저장소: `hic0106/HIC`, 작업 브랜치: `claude/binance-crypto-trading-terminal-xspxvw` (여기에만 commit/push, PR은 요청 시에만).
 - 스택: Node 22 ESM, Express 5, ws, lightweight-charts v5, @anthropic-ai/sdk 0.128.0. 빌드 단계 없음.
 - 실행: `start.bat`(Windows, npm install 후 서버 실행) 또는 `npm start` → http://localhost:8420 (`PORT` 환경변수로 변경 가능)
-- 테스트: `npm test` (현재 144개 전부 통과). 가짜 서버: `npm run mock`, `npm run dev:mock`(data-mock/ 사용), `npm run mock:claude` + `ANTHROPIC_BASE_URL=http://127.0.0.1:9902`.
+- 테스트: `npm test` (현재 150개 전부 통과). 가짜 서버: `npm run mock`, `npm run dev:mock`(data-mock/ 사용), `npm run mock:claude` + `ANTHROPIC_BASE_URL=http://127.0.0.1:9902`.
 - 자세한 사용법/구조: `README.md`.
 
 ## 사용자 선호
@@ -36,6 +36,7 @@
 | ADX | 코인 Universe | 4h | ADX14 > 25, SMA200 필터, 숏 허용 |
 | TSMOM | 코인 Universe | 1d | lookback 30, 롱만 |
 | RAYNER (기본 OFF) | 코인 Universe | 4h | EMA50 + MACD(1,50,9) 히스토그램 가속, STRUCTURE 손절(최근 10봉), 히스토그램 목표 익절(진입 시 고정), 추세당 최대 2회 |
+| MA_PULLBACK (기본 OFF) | 코인 Universe (전략 상위 5) | 1h | TradingView 눌림목 9EMA·20/200SMA 이식: SMA200 추세 + SMA20 상승 + 저가 SMA20 터치·종가 위 양봉(숏 대칭). 손절 = 신호봉 저가/고가(STRUCTURE), 목표 = 종가 ± rr(2)×손절폭 고정(`sig.tpTarget`). 전략 청산·트레일링·추가매수 없음(META noTrail/noAdds) |
 | QQQ_EMA_TREND / QQQ_TSMOM (ON), QQQ_SMA200 / QQQ_TURTLE_50_20 (OFF) | QQQUSDT | 미국 정규장 세션 | 롱/현금만 |
 
 추가 매수: 보유 중 같은 방향 진입 조건이 다시 참이면 캔들당 1회, 포지션당 최대 `general.maxAdds`(기본 0=끔)회 추가. 평균단가 합산, 손절은 추가 체결가 기준 재계산 후 유리한 쪽으로만 이동, LIVE는 기존 Binance Stop 취소 → 총수량으로 재등록. 백테스트에도 반영.

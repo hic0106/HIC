@@ -321,7 +321,7 @@ export class Engine {
         const pos = slot.position;
         const again = side === 'LONG' ? sig.longCond : sig.shortCond && scfg.shortEnabled;
         const trendFull = STRATEGY_META[strategy].trendEntries && (slot.trendCount?.[side] || 0) >= scfg.params.maxEntriesPerTrend;
-        const maxAdds = maxAddsFor(scfg, this.cfg.general);
+        const maxAdds = STRATEGY_META[strategy].noAdds ? 0 : maxAddsFor(scfg, this.cfg.general);
         if (again && allowEntry && !trendFull && (pos.adds || 0) < maxAdds) {
           if (!slot.lastSkip) this.log.trade(`${tag} ${side} signal while holding — add ${(pos.adds || 0) + 1}/${maxAdds} (${trigger})`, 'SIGNAL');
           const r = await this.openPosition(strategy, symbol, side, sig, true);
@@ -498,7 +498,7 @@ export class Engine {
       }
       const order = this.newOrderRecord({ strategy, symbol, action: 'OPEN', side, qty: chk.qty, amount: chk.amount, refPrice: chk.price });
       slot.pending = { clientOrderId: order.clientOrderId, action: 'OPEN', add, side, qty: chk.qty, amount: chk.amount, baseAmount: chk.baseAmount, ctrlMultiplier: chk.ctrl.multiplier, ctrlStatus: chk.ctrl.status, atr: sig?.atr ?? null,
-        structStop: sig?.structStop?.[side] ?? null, histTarget: sig?.histTarget?.[side] ?? null, signalCandle: sig?.candleTime ?? null, createdAt: Date.now(), notFound: 0 };
+        structStop: sig?.structStop?.[side] ?? null, histTarget: sig?.histTarget?.[side] ?? null, tpTarget: sig?.tpTarget?.[side] ?? null, signalCandle: sig?.candleTime ?? null, createdAt: Date.now(), notFound: 0 };
       slot.status = 'PENDING';
       this.store.saveStateNow(); // persist intent BEFORE sending (crash safety)
       const r = await this.execute(slot, order);
@@ -692,7 +692,8 @@ export class Engine {
       const distPct = es.distPct;
       const tick = this.md.filters[slot.symbol]?.tickSize || 0;
       const stopPrice = es.stopPrice == null ? null : roundToTick(es.stopPrice, tick);
-      const tpPrice = scfg.takeProfit.enabled ? fill.avgPrice * (1 + dirOf(side) * scfg.takeProfit.pct / 100) : null;
+      // fixed price target from the signal candle (MA_PULLBACK: close ± rr x risk), else the % take profit
+      const tpPrice = pend.tpTarget != null ? roundToTick(pend.tpTarget, tick) : scfg.takeProfit.enabled ? fill.avgPrice * (1 + dirOf(side) * scfg.takeProfit.pct / 100) : null;
       slot.position = {
         strategy: slot.strategy, symbol: slot.symbol, side, entryPrice: fill.avgPrice, qty: fill.executedQty,
         orderAmount: pend.amount, baseAmount: pend.baseAmount ?? pend.amount, ctrlMultiplier: pend.ctrlMultiplier ?? 1, ctrlStatus: pend.ctrlStatus ?? 'OFF', entryNotional: fill.avgPrice * fill.executedQty, entryFee: fill.fee, funding: 0,
@@ -838,7 +839,7 @@ export class Engine {
     const tr = this.cfg.general.trailing;
     const pos = slot.position;
     const unit = pos.atrAtEntry; // ATR of the strategy's candle at entry
-    if (!tr?.enabled || !(unit > 0) || pos.stopPrice == null || pos.stopInvalid) return;
+    if (!tr?.enabled || STRATEGY_META[slot.strategy]?.noTrail || !(unit > 0) || pos.stopPrice == null || pos.stopInvalid) return;
     const d = dirOf(pos.side);
     pos.peak = d > 0 ? Math.max(pos.peak ?? pos.entryPrice, price) : Math.min(pos.peak ?? pos.entryPrice, price);
     if ((pos.peak - pos.entryPrice) * d < tr.activateAtr * unit) return;

@@ -62,7 +62,7 @@ export const DEFAULT_CONFIG = {
     boostRegimes: { LONG: ['BULL_TREND', 'NORMAL'], SHORT: ['BEAR_TREND'] },
     // optional hard maximum USDT per order (null = none)
     maxOrderUsdt: {
-      TURTLE: { LONG: null, SHORT: null }, ADX: { LONG: null, SHORT: null }, TSMOM: { LONG: null, SHORT: null }, RAYNER: { LONG: null, SHORT: null }, TREND_RIDER: { LONG: null, SHORT: null }, VOL_BREAKOUT: { LONG: null, SHORT: null },
+      TURTLE: { LONG: null, SHORT: null }, ADX: { LONG: null, SHORT: null }, TSMOM: { LONG: null, SHORT: null }, RAYNER: { LONG: null, SHORT: null }, TREND_RIDER: { LONG: null, SHORT: null }, VOL_BREAKOUT: { LONG: null, SHORT: null }, MA_PULLBACK: { LONG: null, SHORT: null },
       QQQ_EMA_TREND: { LONG: null, SHORT: null }, QQQ_TSMOM: { LONG: null, SHORT: null }, QQQ_SMA200: { LONG: null, SHORT: null }, QQQ_TURTLE_50_20: { LONG: null, SHORT: null },
     },
   },
@@ -108,6 +108,15 @@ export const DEFAULT_CONFIG = {
       params: { k: 3, levelAtr: 14, trailPeriod: 8, trailMult: 3, maxHoldBars: 24, trendPeriod: 200, shortK: 5, shortHoldBars: 12, shortSlopeBars: 72, volMult: 2, volPeriod: 20 },
       stop: { mode: 'ATR_DYNAMIC', atrPeriod: 14, atrMult: 2, minPct: 1, maxPct: 6, fixedPct: 3 },
       takeProfit: { enabled: false, pct: 5 },
+    },
+    // MA Pullback (TradingView 9 EMA & 20/200 SMA): SMA200 trend + rising SMA20, dip to the SMA20 closing back as a
+    // trend-direction candle. Stop = signal candle low/high, target = close ± rr x risk (fixed). Off by default.
+    MA_PULLBACK: {
+      enabled: false, timeframe: '1h', shortEnabled: true, leverage: 1, amounts: amounts(100, 100), maxAdds: 0,
+      universe: { topN: 5, excludeMajors: false },
+      params: { emaFast: 9, smaMid: 20, smaTrend: 200, rr: 2 },
+      stop: { mode: 'STRUCTURE', atrPeriod: 14, atrMult: 2, minPct: 0.5, maxPct: 10, fixedPct: 3 },
+      takeProfit: { enabled: false, pct: 5 }, // unused: the target comes from rr x risk
     },
     // Trend Rider: N-bar breakout in the SMA200 direction, Chandelier trailing exit (HH(trail) - ATR(trail) x mult).
     // Off by default (backtest validation first).

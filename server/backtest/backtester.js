@@ -37,9 +37,9 @@ export async function backtestStrategy({ strategy, config, data, funding = {}, s
   const W = LIVE_WINDOW[tf] ?? 1000;
   const fee = g.takerFeePct / 100, slip = g.slippagePct / 100;
   const useFunding = !!g.includeFunding;
-  const maxAdds = maxAddsFor(scfg, g);
-  const trail = g.trailing?.enabled ? g.trailing : null;
   const meta = custom ? custom.meta : META[strategy];
+  const maxAdds = meta?.noAdds ? 0 : maxAddsFor(scfg, g);
+  const trail = g.trailing?.enabled && !meta?.noTrail ? g.trailing : null;
   const n = Math.max(1, Math.min(symbols.length, slots > 0 ? slots : symbols.length));
   const capSlots = n < symbols.length; // more watched symbols than slots: limit concurrent positions
 
@@ -95,7 +95,7 @@ export async function backtestStrategy({ strategy, config, data, funding = {}, s
     cash -= entryFee;
     pos[s] = { side, entry: px, qty, notional: alloc, time, entryFee, fundingAcc: 0, atr: o.atr ?? null, adds: 0, peak: px, trailing: false,
       stop: es.stopPrice, stopPct: es.distPct, stopMode: scfg.stop.mode, histTarget: o.histTarget ?? null,
-      tp: scfg.takeProfit?.enabled ? px * (1 + dirOf(side) * scfg.takeProfit.pct / 100) : null };
+      tp: o.tpTarget != null ? o.tpTarget : scfg.takeProfit?.enabled ? px * (1 + dirOf(side) * scfg.takeProfit.pct / 100) : null };
     if (meta.trendEntries) recordTrendEntry(trendEntries[s], side, o.signalCandle);
   };
 
@@ -200,7 +200,7 @@ export async function backtestStrategy({ strategy, config, data, funding = {}, s
       if (block[s][side]) { stats.signalsSkipped++; continue; }
       if (meta.trendEntries && trendCounts(sig, trendEntries[s])[side] >= scfg.params.maxEntriesPerTrend) { stats.trendMax++; continue; }
       if (tradeFilter && !tradeFilter(s, b.T + 1)) { stats.universeSkipped++; continue; }
-      pending[s].push({ type: 'ENTRY', side, atr: sig.atr, structStop: sig.structStop?.[side] ?? null, histTarget: sig.histTarget?.[side] ?? null, signalCandle: sig.candleTime, signalTime: b.T + 1 });
+      pending[s].push({ type: 'ENTRY', side, atr: sig.atr, structStop: sig.structStop?.[side] ?? null, histTarget: sig.histTarget?.[side] ?? null, tpTarget: sig.tpTarget?.[side] ?? null, signalCandle: sig.candleTime, signalTime: b.T + 1 });
     }
     // mark to market once per time step
     const eq = equityNow();

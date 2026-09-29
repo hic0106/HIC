@@ -4,7 +4,7 @@
 
 import { sma, ema, atr, adx, priorHigh, priorLow, logMomentum, macd, lowestLow, highestHigh } from './indicators.js';
 
-export const STRATEGIES = ['TURTLE', 'ADX', 'TSMOM', 'RAYNER', 'TREND_RIDER', 'VOL_BREAKOUT'];
+export const STRATEGIES = ['TURTLE', 'ADX', 'TSMOM', 'RAYNER', 'TREND_RIDER', 'VOL_BREAKOUT', 'MA_PULLBACK'];
 
 export const STRATEGY_META = {
   TURTLE: { label: 'Turtle 20/10', short: 'T', supportsShort: true, exitRule: (p) => `${p.exitPeriod}봉 채널 이탈`,
@@ -25,6 +25,13 @@ export const STRATEGY_META = {
   // EMA(trendPeriod); exit on a short Chandelier trail or after maxHoldBars (TIME_EXIT).
   VOL_BREAKOUT: { label: 'Vol Breakout', short: 'V', supportsShort: true, resetAfterStop: false,
     exitRule: (p) => `${p.trailPeriod}봉 추적 ATR×${p.trailMult} 이탈 또는 ${p.maxHoldBars}봉 보유` },
+  // Moving-average pullback (TradingView "이동평균선 눌림목 매매법 9 EMA & 20/200 SMA"): with the SMA200 trend and a rising
+  // SMA20, a candle that dips to the SMA20 and closes back above it as a bullish candle. Fixed stop at the signal
+  // candle's low and a fixed target at close + rr x (close - low); no strategy exit, no trailing, no add-ons (Pine:
+  // strategy.exit stop/limit, one position). Short mirrored.
+  MA_PULLBACK: { label: 'MA Pullback 9/20/200', short: 'P', supportsShort: true, resetAfterStop: false, stopModes: ['STRUCTURE'],
+    fixedTarget: true, noTrail: true, noAdds: true,
+    exitRule: (p) => `손절 신호봉 저가/고가 · 익절 손절폭×${p.rr}` },
 };
 
 // Exit reason for an emergency stop of the given stop mode.
@@ -84,6 +91,7 @@ export function minCandles(name, cfg) {
   if (name === 'TSMOM') return Math.max(p.lookback, atrP) + 2;
   if (name === 'VOL_BREAKOUT') return Math.max(p.levelAtr + 1, p.trailPeriod + 1, p.trendPeriod, atrP) + 2;
   if (name === 'TREND_RIDER') return Math.max(p.entryPeriod, p.trailPeriod + 1, p.smaFilter, atrP) + 2;
+  if (name === 'MA_PULLBACK') return Math.max(p.smaTrend, p.smaMid + 1, p.emaFast, atrP) + 2;
   if (name === 'RAYNER') return Math.max(p.emaPeriod + p.slopeLookback, p.slowPeriod + p.signalPeriod + Math.max(p.momentumLookback, p.targetLookback), p.stopLookback, atrP) + 2;
   return 0;
 }
@@ -232,6 +240,23 @@ export function evaluate(name, candles, cfg) {
       shortExit: k.c > shortTrail,
       exitLevel: { LONG: longTrail, SHORT: shortTrail },
       view: { entryHigh, entryLow, sma: smaVal, longTrail, shortTrail, atr: atrVal },
+    };
+  }
+  if (name === 'MA_PULLBACK') {
+    const s20 = sma(closes, p.smaMid), s200 = sma(closes, p.smaTrend)[i], e9 = ema(closes, p.emaFast)[i];
+    const m0 = s20[i], m1 = s20[i - 1];
+    if (m0 == null || m1 == null || s200 == null) return { ready: false, reason: 'MA Pullback warmup' };
+    // Pine: is_bull_trend and ta.change(sma20) > 0 and (low <= sma20 and close > sma20) and close > open
+    const longCond = k.c > s200 && m0 - m1 > 0 && k.l <= m0 && k.c > m0 && k.c > k.o;
+    const shortCond = k.c < s200 && m0 - m1 < 0 && k.h >= m0 && k.c < m0 && k.c < k.o;
+    const longTp = k.c + (k.c - k.l) * p.rr, shortTp = k.c - (k.h - k.c) * p.rr;
+    return {
+      ready: true, candleTime: k.t, close: k.c, atr: atrVal,
+      longCond, shortCond,
+      longExit: false, shortExit: false, // exits only by the fixed stop / target
+      structStop: { LONG: k.l, SHORT: k.h },
+      tpTarget: { LONG: longTp, SHORT: shortTp },
+      view: { ema9: e9, sma20: m0, sma200: s200, sma20Up: m0 > m1, longStop: k.l, longTp, shortStop: k.h, shortTp, atr: atrVal },
     };
   }
   throw new Error(`unknown strategy ${name}`);
