@@ -159,10 +159,10 @@ async function loadCandles() {
   const mk = [];
   for (const t of x.trades.filter((t) => t.symbol === B.sym)) {
     const L = t.side === 'LONG';
-    mk.push({ time: toT(t.entryTime), position: L ? 'belowBar' : 'aboveBar', shape: L ? 'arrowUp' : 'arrowDown', color: L ? '#0ecb81' : '#f6465d', text: `${L ? '롱' : '숏'} ${px(t.entryPrice)}` });
-    mk.push({ time: toT(t.exitTime), position: L ? 'aboveBar' : 'belowBar', shape: 'circle', color: t.net >= 0 ? '#3d8bfd' : '#f0b90b', text: `${t.reason === 'STRATEGY_EXIT' ? '청산' : REASON[t.reason] || t.reason} ${fPct(t.returnPct, 1)}` });
+    mk.push({ time: toT(t.entryTime), position: L ? 'belowBar' : 'aboveBar', shape: L ? 'arrowUp' : 'arrowDown', color: L ? '#0ecb81' : '#f6465d', text: `${L ? 'Buy' : 'Sell'} ${px(t.entryPrice)}` });
+    mk.push({ time: toT(t.exitTime), position: L ? 'aboveBar' : 'belowBar', shape: L ? 'arrowDown' : 'arrowUp', color: L ? '#f6465d' : '#0ecb81', text: `${L ? 'Sell' : 'Buy'} ${fPct(t.returnPct, 1)}${t.reason === 'STRATEGY_EXIT' ? '' : ` ${REASON[t.reason] || t.reason}`}` });
   }
-  for (const p of x.openPositions.filter((p) => p.symbol === B.sym)) mk.push({ time: toT(p.entryTime), position: p.side === 'LONG' ? 'belowBar' : 'aboveBar', shape: p.side === 'LONG' ? 'arrowUp' : 'arrowDown', color: '#c77dff', text: `${SIDE[p.side]} 보유 중` });
+  for (const p of x.openPositions.filter((p) => p.symbol === B.sym)) mk.push({ time: toT(p.entryTime), position: p.side === 'LONG' ? 'belowBar' : 'aboveBar', shape: p.side === 'LONG' ? 'arrowUp' : 'arrowDown', color: '#c77dff', text: `${p.side === 'LONG' ? 'Buy' : 'Sell'} 보유 중` });
   mk.sort((a, b) => a.time - b.time);
   B.markers.setMarkers(mk);
   B.cChart.timeScale().fitContent();

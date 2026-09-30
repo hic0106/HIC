@@ -141,12 +141,13 @@ export class ChartView {
     const first = this.data[0].time;
     const snapT = (ts) => toT(Math.floor(ts / ms) * ms);
     const mk = [];
-    const entry = (st, side, ts, px) => mk.push({ time: snapT(ts), position: side === 'LONG' ? 'belowBar' : 'aboveBar', color: ST_COLOR[st], shape: side === 'LONG' ? 'arrowUp' : 'arrowDown', text: `${st[0]}${side[0]} ${px}` });
+    // Buy = long entry / short exit (green, below the bar), Sell = short entry / long exit (red, above the bar)
+    const mark = (st, buy, ts, text) => mk.push({ time: snapT(ts), position: buy ? 'belowBar' : 'aboveBar', color: buy ? '#0ecb81' : '#f6465d', shape: buy ? 'arrowUp' : 'arrowDown', text: `${st[0]} ${buy ? 'Buy' : 'Sell'} ${text}` });
     for (const t of trades) {
-      entry(t.strategy, t.side, t.entryTime, fNum(t.entryPrice, this.dec));
-      mk.push({ time: snapT(t.exitTime), position: t.side === 'LONG' ? 'aboveBar' : 'belowBar', color: t.netPnl >= 0 ? '#0ecb81' : '#f6465d', shape: 'circle', text: `${t.strategy[0]}X ${t.returnPct.toFixed(1)}%` });
+      mark(t.strategy, t.side === 'LONG', t.entryTime, fNum(t.entryPrice, this.dec));
+      mark(t.strategy, t.side !== 'LONG', t.exitTime, fPct(t.returnPct, 1));
     }
-    for (const p of opens) entry(p.strategy, p.side, p.entryTime, fNum(p.entryPrice, this.dec));
+    for (const p of opens) mark(p.strategy, p.side === 'LONG', p.entryTime, fNum(p.entryPrice, this.dec));
     this.markers.setMarkers(mk.filter((m) => m.time >= first).sort((a, b) => a.time - b.time));
   }
 }
