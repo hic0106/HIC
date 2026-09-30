@@ -22,7 +22,7 @@
 // `slots` positions are open at once. 1x notional, no leverage.
 import { META, evaluateStrategy, applyRegime, applyRank, symbolsForStrategy, exitFor, entryStop, stopReasonOf, trendCounts, recordTrendEntry } from '../strategyRegistry.js';
 import { timeframeOf, US_SESSION } from '../scheduler/timeframes.js';
-import { maxAddsFor, trailingFor } from '../strategyConfig.js';
+import { maxAddsFor, addGainOk, trailingFor } from '../strategyConfig.js';
 
 // indicator window = what the live market data keeps: 1000 bars per interval, 500 daily
 export const LIVE_WINDOW = new Proxy({ '1d': 500, [US_SESSION]: Infinity }, { get: (o, k) => (k in o ? o[k] : 1000) });
@@ -194,7 +194,7 @@ export async function backtestStrategy({ strategy, config, data, funding = {}, s
           const p = pos[s];
           const again = p.side === 'LONG' ? sig.longCond : sig.shortCond && scfg.shortEnabled;
           const trendFull = meta.trendEntries && trendCounts(sig, trendEntries[s])[p.side] >= scfg.params.maxEntriesPerTrend;
-          if (again && !trendFull && p.adds < maxAdds && (!tradeFilter || tradeFilter(s, b.T + 1))) {
+          if (again && !trendFull && p.adds < maxAdds && addGainOk(scfg, p.side, p.entry, b.c) && (!tradeFilter || tradeFilter(s, b.T + 1))) {
             pending[s].push({ type: 'ENTRY', add: true, side: p.side, atr: sig.atr, structStop: sig.structStop?.[p.side] ?? null, signalCandle: sig.candleTime, signalTime: b.T + 1 });
           }
           continue;
