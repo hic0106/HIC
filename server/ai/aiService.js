@@ -108,7 +108,7 @@ const EDITABLE = {
   TURTLE: 'params.entryPeriod(5-100), params.exitPeriod(3-60), params.smaFilter(50-300), timeframe(4h|1d), shortEnabled',
   ADX: 'params.adxPeriod(7-30), params.threshold(15-40), params.smaFilter(50-300), timeframe(4h|1d), shortEnabled',
   TSMOM: 'params.lookback(10-120), timeframe(4h|1d)',
-  MOM_ROTATION: 'params.lookback(7-60), params.topK(2-10)',
+  MOM_ROTATION: 'params.lookback(7-60), params.topK(2-10), params.addGainPct(5-30)',
   MA_PULLBACK: 'params.smaMid(10-50), params.smaTrend(100-300), params.rr(1-4), timeframe, shortEnabled',
   VOL_BREAKOUT: 'params.k(1-4), params.levelAtr(7-30), params.trendPeriod(0-400), params.trailPeriod(4-30), params.trailMult(1.5-5), params.maxHoldBars(3-72), params.shortK(3-6), params.shortHoldBars(3-24), params.shortSlopeBars(0-120), params.volMult(0-3), params.volPeriod(10-50), timeframe(1h|2h|4h), shortEnabled',
   TREND_RIDER: 'params.entryPeriod(10-100), params.trailPeriod(10-60), params.trailMult(1.5-6), params.smaFilter(50-300), timeframe(4h|12h|1d), shortEnabled',

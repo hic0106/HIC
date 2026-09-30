@@ -7,7 +7,7 @@ import { SYMBOL_META, assetClassOf, ASSET_CLASSES } from './assets.js';
 import { EventEmitter } from 'node:events';
 import { barsFor } from './scheduler/timeframes.js';
 import { reconcilePositions } from './portfolio/reconcile.js';
-import { maxAddsFor, trailingFor } from './strategyConfig.js';
+import { maxAddsFor, addGainOk, trailingFor } from './strategyConfig.js';
 
 const slotKey = (st, sym) => `${st}:${sym}`;
 const dirOf = (side) => (side === 'LONG' ? 1 : -1);
@@ -331,7 +331,7 @@ export class Engine {
         const again = side === 'LONG' ? sig.longCond : sig.shortCond && scfg.shortEnabled;
         const trendFull = STRATEGY_META[strategy].trendEntries && (slot.trendCount?.[side] || 0) >= scfg.params.maxEntriesPerTrend;
         const maxAdds = STRATEGY_META[strategy].noAdds ? 0 : maxAddsFor(scfg, this.cfg.general);
-        if (again && allowEntry && !trendFull && (pos.adds || 0) < maxAdds) {
+        if (again && allowEntry && !trendFull && (pos.adds || 0) < maxAdds && addGainOk(scfg, side, pos.entryPrice, sig.close)) {
           if (!slot.lastSkip) this.log.trade(`${tag} ${side} signal while holding — add ${(pos.adds || 0) + 1}/${maxAdds} (${trigger})`, 'SIGNAL');
           const r = await this.openPosition(strategy, symbol, side, sig, true);
           if (!r.ok && r.transient) return this.skip(slot, sig, r.code, r.msg);

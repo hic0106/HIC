@@ -35,7 +35,7 @@ export const STRATEGY_META = {
   // Cross-sectional momentum rotation: long the topK entry-universe symbols by lookback-candle return, exit when a
   // symbol drops out of the topK. The rank needs every candidate's candles -> applied by strategyRegistry.applyRank
   // (evaluate alone never enters). Pair with the BTC regime filter (regime.exit) for the cash-in-bear-markets rule.
-  MOM_ROTATION: { label: 'Momentum Rotation', short: 'O', supportsShort: false, resetAfterStop: true, crossRank: true, noAdds: true, noTrail: true,
+  MOM_ROTATION: { label: 'Momentum Rotation', short: 'O', supportsShort: false, resetAfterStop: true, crossRank: true, noTrail: true,
     exitRule: (p) => `${p.lookback}봉 수익률 상위 ${p.topK} 이탈` },
 };
 

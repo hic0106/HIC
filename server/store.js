@@ -122,9 +122,11 @@ export const DEFAULT_CONFIG = {
     // coin leaves the top 5 or BTC falls below the SMA (all cash). Research (klzzang/, 2023-09..2026-09, 4h, 1x):
     // IS +513% (MDD 51%) / OOS +166% (MDD 20%). Off by default; the user sets amounts / leverage.
     MOM_ROTATION: {
-      enabled: false, timeframe: '1d', shortEnabled: false, leverage: 1, amounts: amounts(100, 0), maxAdds: 0,
+      enabled: false, timeframe: '1d', shortEnabled: false, leverage: 1, amounts: amounts(100, 0),
+      // add-ons only to winners: +addGainPct % over the average entry, one per daily candle, at most maxAdds
+      maxAdds: 3,
       universe: { topN: 20, excludeMajors: false }, regime: { sma: 100, exit: true },
-      params: { lookback: 14, topK: 5 },
+      params: { lookback: 14, topK: 5, addGainPct: 10 },
       stop: { mode: 'OFF', atrPeriod: 14, atrMult: 4, minPct: 15, maxPct: 40, fixedPct: 30 },
       takeProfit: { enabled: false, pct: 100 },
     },

@@ -9,7 +9,7 @@ process.env.HIC_LOG_STDOUT = '0';
 const { evaluateStrategy, applyRank, applyRegime, momentumAt } = await import('../server/strategyRegistry.js');
 const { DEFAULT_CONFIG } = await import('../server/store.js');
 const { backtestStrategy } = await import('../server/backtest/backtester.js');
-const { validateStrategySettings } = await import('../server/strategyConfig.js');
+const { validateStrategySettings, addGainOk } = await import('../server/strategyConfig.js');
 
 const DAY = 86_400_000;
 const bars = (closes) => closes.map((c, i) => { const o = i ? closes[i - 1] : c; return { t: i * DAY, T: (i + 1) * DAY - 1, o, h: Math.max(o, c), l: Math.min(o, c), c, v: 1, qv: 1 }; });
@@ -68,8 +68,31 @@ test('MOM_ROTATION backtest: leadership switch rotates the position, never more 
 
 test('MOM_ROTATION settings are validated', () => {
   const cur = DEFAULT_CONFIG.strategies.MOM_ROTATION;
-  const next = validateStrategySettings('MOM_ROTATION', { ...structuredClone(cur), params: { lookback: '21', topK: '3' } }, cur);
-  assert.deepEqual(next.params, { lookback: 21, topK: 3 });
+  const next = validateStrategySettings('MOM_ROTATION', { ...structuredClone(cur), params: { lookback: '21', topK: '3', addGainPct: '15' } }, cur);
+  assert.deepEqual(next.params, { lookback: 21, topK: 3, addGainPct: 15 });
   assert.deepEqual(next.regime, { sma: 100, exit: true });
   assert.throws(() => validateStrategySettings('MOM_ROTATION', { ...structuredClone(cur), params: { lookback: 14, topK: 50 } }, cur));
+});
+
+test('addGainOk: add-on only while the position is up >= params.addGainPct from the average entry', () => {
+  const c = { params: { addGainPct: 10 } };
+  assert.equal(addGainOk(c, 'LONG', 100, 109), false);
+  assert.equal(addGainOk(c, 'LONG', 100, 110), true);
+  assert.equal(addGainOk(c, 'SHORT', 100, 90), true);
+  assert.equal(addGainOk({ params: {} }, 'LONG', 100, 50), true); // no gate
+});
+
+test('MOM_ROTATION backtest: add-ons go to the winner only, at most maxAdds', async () => {
+  const c = structuredClone(DEFAULT_CONFIG);
+  c.strategies.MOM_ROTATION = cfg({ params: { lookback: 5, topK: 2, addGainPct: 10 }, maxAdds: 3 });
+  // A climbs steadily (adds), B sits at the top-2 border without gaining (no adds), C falls (never held)
+  const data = {
+    AUSDT: bars(path_(60, (i) => 100 * 1.03 ** i)),
+    BUSDT: bars(path_(60, (i) => 100 + (i % 2))),
+    CUSDT: bars(path_(60, (i) => 100 - i)),
+  };
+  const r = await backtestStrategy({ strategy: 'MOM_ROTATION', config: c, data, start: 0, end: 60 * DAY, capital: 1000, symbols: ['AUSDT', 'BUSDT', 'CUSDT'] });
+  const a = r.openPositions.find((p) => p.symbol === 'AUSDT'), b = r.openPositions.find((p) => p.symbol === 'BUSDT');
+  assert.equal(r.adds, 3);
+  assert.ok(a.notional > 3.9 * b.notional, `winner holds 4 units: A ${a.notional} vs B ${b.notional}`);
 });
