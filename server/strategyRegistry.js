@@ -29,6 +29,30 @@ export function applyRegime(sig, scfg, btcDaily, closeT) {
   return { ...sig, longCond: false, longExit: scfg.regime.exit ? true : sig.longExit, regimeBlockLong: true };
 }
 
+// Cross-sectional momentum (META.crossRank): long while `symbol` is among the params.topK candidates by
+// params.lookback-candle return, all measured on the candle closing at closeT (candidates without that candle are left
+// out, so a symbol outside the candidates ranks null -> exit). Apply after applyRegime (a blocked long stays blocked).
+// ponytail: live, a candidate whose closing candle has not arrived yet is left out -> others rank higher (at worst an
+// extra entry, never a false exit); a wait-for-all-closes gate if that shows up in the Signal Log.
+export function momentumAt(bars, closeT, lb) {
+  let lo = 0, hi = (bars?.length ?? 0) - 1;
+  while (lo <= hi) {
+    const m = (lo + hi) >> 1;
+    if (bars[m].T < closeT) lo = m + 1;
+    else if (bars[m].T > closeT) hi = m - 1;
+    else return m >= lb && bars[m - lb].c > 0 ? bars[m].c / bars[m - lb].c - 1 : null;
+  }
+  return null;
+}
+
+export function applyRank(sig, name, scfg, symbol, candidates, barsOf, closeT) {
+  if (!META[name]?.crossRank || !sig.ready) return sig;
+  const ranked = candidates.map((s) => [s, momentumAt(barsOf(s), closeT, scfg.params.lookback)]).filter(([, m]) => m != null).sort((a, b) => b[1] - a[1]);
+  const rank = ranked.findIndex(([s]) => s === symbol) + 1 || null;
+  const top = rank != null && rank <= scfg.params.topK;
+  return { ...sig, longCond: top && !sig.regimeBlockLong, longExit: sig.longExit || !top, view: { ...sig.view, rank, candidates: ranked.length } };
+}
+
 export const strategiesForSymbol =(sym) => (assetClassOf(sym) === 'CRYPTO' ? CRYPTO_STRATEGIES : TRADFI_STRATEGIES);
 export const symbolsForStrategy = (st) => symbolsOfClass(STRATEGY_CLASS[st]);
 

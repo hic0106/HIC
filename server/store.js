@@ -62,7 +62,7 @@ export const DEFAULT_CONFIG = {
     boostRegimes: { LONG: ['BULL_TREND', 'NORMAL'], SHORT: ['BEAR_TREND'] },
     // optional hard maximum USDT per order (null = none)
     maxOrderUsdt: {
-      TURTLE: { LONG: null, SHORT: null }, ADX: { LONG: null, SHORT: null }, TSMOM: { LONG: null, SHORT: null }, RAYNER: { LONG: null, SHORT: null }, TREND_RIDER: { LONG: null, SHORT: null }, VOL_BREAKOUT: { LONG: null, SHORT: null }, MA_PULLBACK: { LONG: null, SHORT: null },
+      TURTLE: { LONG: null, SHORT: null }, ADX: { LONG: null, SHORT: null }, TSMOM: { LONG: null, SHORT: null }, RAYNER: { LONG: null, SHORT: null }, TREND_RIDER: { LONG: null, SHORT: null }, VOL_BREAKOUT: { LONG: null, SHORT: null }, MA_PULLBACK: { LONG: null, SHORT: null }, MOM_ROTATION: { LONG: null, SHORT: null },
       QQQ_EMA_TREND: { LONG: null, SHORT: null }, QQQ_TSMOM: { LONG: null, SHORT: null }, QQQ_SMA200: { LONG: null, SHORT: null }, QQQ_TURTLE_50_20: { LONG: null, SHORT: null },
     },
   },
@@ -117,6 +117,16 @@ export const DEFAULT_CONFIG = {
       params: { emaFast: 9, smaMid: 20, smaTrend: 200, rr: 2 },
       stop: { mode: 'STRUCTURE', atrPeriod: 14, atrMult: 2, minPct: 0.5, maxPct: 10, fixedPct: 3 },
       takeProfit: { enabled: false, pct: 5 }, // unused: the target comes from rr x risk
+    },
+    // Momentum rotation: BTC daily close > SMA100 -> long the top 5 of the watched coins by 14-day return, exit when a
+    // coin leaves the top 5 or BTC falls below the SMA (all cash). Research (klzzang/, 2023-09..2026-09, 4h, 1x):
+    // IS +513% (MDD 51%) / OOS +166% (MDD 20%). Off by default; the user sets amounts / leverage.
+    MOM_ROTATION: {
+      enabled: false, timeframe: '1d', shortEnabled: false, leverage: 1, amounts: amounts(100, 0), maxAdds: 0,
+      universe: { topN: 20, excludeMajors: false }, regime: { sma: 100, exit: true },
+      params: { lookback: 14, topK: 5 },
+      stop: { mode: 'OFF', atrPeriod: 14, atrMult: 4, minPct: 15, maxPct: 40, fixedPct: 30 },
+      takeProfit: { enabled: false, pct: 100 },
     },
     // Trend Rider: N-bar breakout in the SMA200 direction, Chandelier trailing exit (HH(trail) - ATR(trail) x mult).
     // Off by default (backtest validation first).

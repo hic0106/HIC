@@ -4,7 +4,7 @@
 
 import { sma, ema, atr, adx, priorHigh, priorLow, logMomentum, macd, lowestLow, highestHigh } from './indicators.js';
 
-export const STRATEGIES = ['TURTLE', 'ADX', 'TSMOM', 'RAYNER', 'TREND_RIDER', 'VOL_BREAKOUT', 'MA_PULLBACK'];
+export const STRATEGIES = ['TURTLE', 'ADX', 'TSMOM', 'RAYNER', 'TREND_RIDER', 'VOL_BREAKOUT', 'MA_PULLBACK', 'MOM_ROTATION'];
 
 export const STRATEGY_META = {
   TURTLE: { label: 'Turtle 20/10', short: 'T', supportsShort: true, exitRule: (p) => `${p.exitPeriod}봉 채널 이탈`,
@@ -32,6 +32,11 @@ export const STRATEGY_META = {
   MA_PULLBACK: { label: 'MA Pullback 9/20/200', short: 'P', supportsShort: true, resetAfterStop: false, stopModes: ['STRUCTURE'],
     fixedTarget: true, noTrail: true, noAdds: true,
     exitRule: (p) => `손절 신호봉 저가/고가 · 익절 손절폭×${p.rr}` },
+  // Cross-sectional momentum rotation: long the topK entry-universe symbols by lookback-candle return, exit when a
+  // symbol drops out of the topK. The rank needs every candidate's candles -> applied by strategyRegistry.applyRank
+  // (evaluate alone never enters). Pair with the BTC regime filter (regime.exit) for the cash-in-bear-markets rule.
+  MOM_ROTATION: { label: 'Momentum Rotation', short: 'O', supportsShort: false, resetAfterStop: true, crossRank: true, noAdds: true, noTrail: true,
+    exitRule: (p) => `${p.lookback}봉 수익률 상위 ${p.topK} 이탈` },
 };
 
 // Exit reason for an emergency stop of the given stop mode.
@@ -92,6 +97,7 @@ export function minCandles(name, cfg) {
   if (name === 'VOL_BREAKOUT') return Math.max(p.levelAtr + 1, p.trailPeriod + 1, p.trendPeriod, atrP) + 2;
   if (name === 'TREND_RIDER') return Math.max(p.entryPeriod, p.trailPeriod + 1, p.smaFilter, atrP) + 2;
   if (name === 'MA_PULLBACK') return Math.max(p.smaTrend, p.smaMid + 1, p.emaFast, atrP) + 2;
+  if (name === 'MOM_ROTATION') return Math.max(p.lookback + 1, atrP) + 2;
   if (name === 'RAYNER') return Math.max(p.emaPeriod + p.slopeLookback, p.slowPeriod + p.signalPeriod + Math.max(p.momentumLookback, p.targetLookback), p.stopLookback, atrP) + 2;
   return 0;
 }
@@ -150,6 +156,14 @@ export function evaluate(name, candles, cfg) {
       shortExit: true,
       exitLevel: { LONG: candles[i + 1 - p.lookback]?.c ?? null, SHORT: null }, // next close <= this -> momentum <= 0
       view: { momentum: mom, momentumPct: (Math.exp(mom) - 1) * 100, atr: atrVal },
+    };
+  }
+  if (name === 'MOM_ROTATION') {
+    const mom = k.c / candles[i - p.lookback].c - 1;
+    return {
+      ready: true, candleTime: k.t, close: k.c, atr: atrVal,
+      longCond: false, shortCond: false, longExit: false, shortExit: true, // set by applyRank
+      view: { momentumPct: mom * 100, atr: atrVal },
     };
   }
   if (name === 'RAYNER') {

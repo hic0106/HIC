@@ -1,7 +1,7 @@
 // Trading engine: strategy evaluation, pre-trade checks, paper/live execution,
 // emergency stops, funding, PnL accounting and UI snapshot.
 import { BinanceClient, BinanceError, endpoints, floorToStep, fmtQty, roundToTick, fmtPrice } from './binance.js';
-import { ALL_STRATEGIES as STRATEGIES, META as STRATEGY_META, evaluateStrategy as evaluate, applyRegime, strategiesForSymbol, STRATEGY_CLASS, exitFor, entryStop, stopReasonOf, trendCounts, recordTrendEntry, impliedSide } from './strategyRegistry.js';
+import { ALL_STRATEGIES as STRATEGIES, META as STRATEGY_META, evaluateStrategy as evaluate, applyRegime, applyRank, strategiesForSymbol, STRATEGY_CLASS, exitFor, entryStop, stopReasonOf, trendCounts, recordTrendEntry, impliedSide } from './strategyRegistry.js';
 import { SYMBOLS, emptyModeState } from './store.js';
 import { SYMBOL_META, assetClassOf, ASSET_CLASSES } from './assets.js';
 import { EventEmitter } from 'node:events';
@@ -275,12 +275,21 @@ export class Engine {
     }
   }
 
+  // cross-rank strategies (MOM_ROTATION): symbols ranked against each other = this strategy's entry universe
+  rankCandidates(strategy) {
+    if (!STRATEGY_META[strategy]?.crossRank) return [];
+    const su = this.cfg.strategies[strategy].universe;
+    return SYMBOLS.filter((s) => strategiesForSymbol(s).includes(strategy) && (!this.universe || this.universe.isTradeAllowed(s, su)));
+  }
+
   // Returns an outcome for the Signal Log. final=true -> this candle is done (never evaluated again).
   // opts.allowEntry=false (stale candle after restart / late start): exits still run, new entries are skipped.
   async evaluateSlot(strategy, symbol, trigger, opts = {}) {
     const scfg = this.cfg.strategies[strategy];
     const candles = opts.bars || barsFor(this.md, strategy, symbol, this.cfg);
-    const sig = applyRegime(evaluate(strategy, candles, scfg), scfg, this.md.s.BTCUSDT?.daily, candles[candles.length - 1]?.T ?? Date.now());
+    const closeT = candles[candles.length - 1]?.T ?? Date.now();
+    const sig = applyRank(applyRegime(evaluate(strategy, candles, scfg), scfg, this.md.s.BTCUSDT?.daily, closeT), strategy, scfg, symbol,
+      this.rankCandidates(strategy), (s) => barsFor(this.md, strategy, s, this.cfg), closeT);
     const slot = this.slot(strategy, symbol);
     if (!sig.ready) { slot.view = { notReady: sig.reason }; return { result: 'NOT_READY', reason: sig.reason, final: false, sig }; }
     slot.view = sig.view;

@@ -7,7 +7,7 @@
 //   Controller = base order × controller multiplier (0 … 1.25)
 // The baseline book is also the controller's performance data source: it is not distorted by
 // controller sizing and keeps accumulating while a strategy is PAUSED.
-import { ALL_STRATEGIES as STRATEGIES, META as STRATEGY_META, evaluateStrategy as evaluate, applyRegime, strategiesForSymbol, STRATEGY_CLASS, exitFor, entryStop, stopReasonOf, trendCounts, recordTrendEntry } from '../strategyRegistry.js';
+import { ALL_STRATEGIES as STRATEGIES, META as STRATEGY_META, evaluateStrategy as evaluate, applyRegime, applyRank, strategiesForSymbol, STRATEGY_CLASS, exitFor, entryStop, stopReasonOf, trendCounts, recordTrendEntry } from '../strategyRegistry.js';
 import { barsFor, timeframeOf } from '../scheduler/timeframes.js';
 
 const dirOf = (side) => (side === 'LONG' ? 1 : -1);
@@ -57,7 +57,9 @@ export class ShadowPortfolio {
     if (!scfg.enabled) return; // mirrors the engine: disabled strategies do not act
     if (!this.md.s[symbol] || this.md.s[symbol].unavailable) return;
     const bars = barsFor(this.md, strategy, symbol, cfg);
-    const sig = applyRegime(evaluate(strategy, bars, scfg), scfg, this.md.s.BTCUSDT?.daily, bars[bars.length - 1]?.T ?? now);
+    const closeT = bars[bars.length - 1]?.T ?? now;
+    const cands = STRATEGY_META[strategy].crossRank ? this.symbols.filter((s) => strategiesForSymbol(s).includes(strategy) && this.canEnter(s)) : [];
+    const sig = applyRank(applyRegime(evaluate(strategy, bars, scfg), scfg, this.md.s.BTCUSDT?.daily, closeT), strategy, scfg, symbol, cands, (s) => barsFor(this.md, strategy, s, cfg), closeT);
     if (!sig.ready) return;
     const slot = this.slot(strategy, symbol);
     if (slot.lastCandle === sig.candleTime) return;

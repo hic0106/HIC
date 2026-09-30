@@ -20,7 +20,7 @@
 // Sizing: each strategy has its own account (capital). Each slot gets equity / nSlots at entry (compound) or
 // capital / nSlots (fixed); nSlots = number of symbols, or `slots` (e.g. tradeTopN) when given - then at most
 // `slots` positions are open at once. 1x notional, no leverage.
-import { META, evaluateStrategy, applyRegime, symbolsForStrategy, exitFor, entryStop, stopReasonOf, trendCounts, recordTrendEntry } from '../strategyRegistry.js';
+import { META, evaluateStrategy, applyRegime, applyRank, symbolsForStrategy, exitFor, entryStop, stopReasonOf, trendCounts, recordTrendEntry } from '../strategyRegistry.js';
 import { timeframeOf, US_SESSION } from '../scheduler/timeframes.js';
 import { maxAddsFor, trailingFor } from '../strategyConfig.js';
 
@@ -41,6 +41,7 @@ export async function backtestStrategy({ strategy, config, data, funding = {}, s
   const maxAdds = meta?.noAdds ? 0 : maxAddsFor(scfg, g);
   const tcfg = trailingFor(custom ? null : scfg, g);
   const trail = tcfg?.enabled && !meta?.noTrail ? tcfg : null;
+  if (!custom && meta?.crossRank) slots = scfg.params.topK; // equity split over the topK positions
   const n = Math.max(1, Math.min(symbols.length, slots > 0 ? slots : symbols.length));
   const capSlots = n < symbols.length; // more watched symbols than slots: limit concurrent positions
 
@@ -136,6 +137,13 @@ export async function backtestStrategy({ strategy, config, data, funding = {}, s
   for (const t of timeline) {
     // yield to the event loop regularly: live price ticks / emergency stops must never wait for a backtest
     if (++step % 100 === 0) await new Promise((r) => setImmediate(r));
+    // rotation (crossRank): all exits at this open first, so a new topK entry never finds the slots still full
+    if (meta?.crossRank) for (const s of symbols) {
+      const i = idx[s].get(t), o = pending[s].find((x) => x.type === 'EXIT');
+      if (i == null || !o || !pos[s]) continue;
+      close(s, bars[s][i].o, t, o.reason || 'STRATEGY_EXIT').signalTime = o.signalTime;
+      pending[s] = pending[s].filter((x) => x !== o);
+    }
     for (const s of symbols) {
       const i = idx[s].get(t);
       if (i == null) continue;
@@ -176,7 +184,8 @@ export async function backtestStrategy({ strategy, config, data, funding = {}, s
       }
       lastPx[s] = b.c;
       // 4) strategy evaluation on this closed candle (same window length as live)
-      const sig = custom ? evalAt[s](i) : applyRegime(evaluateStrategy(strategy, bars[s].slice(Math.max(0, i + 1 - (Number.isFinite(W) ? W : i + 1)), i + 1), scfg), scfg, btcDaily, b.T);
+      const sig = custom ? evalAt[s](i) : applyRank(applyRegime(evaluateStrategy(strategy, bars[s].slice(Math.max(0, i + 1 - (Number.isFinite(W) ? W : i + 1)), i + 1), scfg), scfg, btcDaily, b.T),
+        strategy, scfg, s, meta?.crossRank ? symbols.filter((x) => !tradeFilter || tradeFilter(x, b.T + 1)) : [], (x) => bars[x], b.T);
       if (!sig.ready) { stats.notReady[s] = (stats.notReady[s] || 0) + 1; continue; }
       if (pos[s]) {
         const ex = exitFor(strategy, sig, pos[s]);

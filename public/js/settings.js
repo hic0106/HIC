@@ -4,7 +4,7 @@ import { confirmDialog } from './modals.js';
 import { TF } from './ko.js';
 
 const LABEL = {
-  TURTLE: '터틀 20/10 · 롱 + 숏', ADX: 'ADX 추세 · 롱 + 숏', TSMOM: '30일 모멘텀 · 롱 / 현금', RAYNER: 'EMA50 + MACD · 롱 + 숏', TREND_RIDER: '돌파 + 샹들리에 추적 청산 · 롱 + 숏', VOL_BREAKOUT: '단타 · 알트 변동성 돌파 (1시간봉)', MA_PULLBACK: '이평선 눌림목 9/20/200 · 손익비 1:2',
+  TURTLE: '터틀 20/10 · 롱 + 숏', ADX: 'ADX 추세 · 롱 + 숏', TSMOM: '30일 모멘텀 · 롱 / 현금', RAYNER: 'EMA50 + MACD · 롱 + 숏', TREND_RIDER: '돌파 + 샹들리에 추적 청산 · 롱 + 숏', VOL_BREAKOUT: '단타 · 알트 변동성 돌파 (1시간봉)', MA_PULLBACK: '이평선 눌림목 9/20/200 · 손익비 1:2', MOM_ROTATION: '14일 수익률 상위 5 로테이션 · 롱 / 현금',
   QQQ_EMA_TREND: 'EMA 추세 · 롱 / 현금', QQQ_TSMOM: '장기 모멘텀 · 롱 / 현금',
   QQQ_SMA200: 'SMA200 추세 · 선택', QQQ_TURTLE_50_20: '느린 터틀 50/20 · 선택',
 };
@@ -12,6 +12,7 @@ const PARAMS = {
   TURTLE: [['entryPeriod', '진입 기간 (봉)', 1], ['exitPeriod', '청산 기간 (봉)', 1], ['smaFilter', '숏 허용 SMA 기간', 1]],
   ADX: [['adxPeriod', 'ADX 기간', 1], ['threshold', 'ADX 기준값', 0.5], ['smaFilter', '숏 허용 SMA 기간', 1]],
   TSMOM: [['lookback', '모멘텀 기간 (일)', 1]],
+  MOM_ROTATION: [['lookback', '수익률 기간 (봉)', 1], ['topK', '보유 종목 수 (상위 K)', 1]],
   MA_PULLBACK: [['emaFast', 'EMA (표시용)', 1], ['smaMid', '눌림 SMA (중기)', 1], ['smaTrend', '추세 SMA (장기)', 1], ['rr', '손익비 (목표 = 손절폭 ×)', 0.1]],
   VOL_BREAKOUT: [['k', '돌파 배수 k (ATR)', 0.5], ['levelAtr', '돌파 ATR 기간 (봉)', 1], ['trendPeriod', '추세 EMA 기간 (0 = 끔)', 1],
     ['trailPeriod', '추적 청산 기간 (봉)', 1], ['trailMult', '추적 ATR 배수', 0.5], ['maxHoldBars', '최대 보유 (봉)', 1],
@@ -123,7 +124,9 @@ function stratCol(name, c, mode, supportsShort) {
     <div class="set-sec">익절</div>
     <div class="fr"><label>익절 사용</label><span>${sw('tp.enabled', c.takeProfit.enabled)}</span></div>
     <div class="fr" data-dep="tp.enabled"><label>익절 %</label>${numIn('tp.pct', c.takeProfit.pct, 1, 'min="0.1"')}</div>
-    <div class="note">${name === 'MA_PULLBACK'
+    <div class="note">${name === 'MOM_ROTATION'
+      ? '감시 종목(진입 유니버스) 전체를 최근 N봉 수익률로 줄 세워 상위 K개만 롱 보유, 순위 밖으로 밀리면 청산. BTC 필터(기본 SMA100, 이탈 시 청산)와 함께 사용 — BTC가 SMA 아래면 전부 현금. 추가 매수·트레일링 없음. 백테스트에서 손절은 성과를 떨어뜨려 기본 꺼짐(급락 대비가 필요하면 넓은 ATR 손절).'
+      : name === 'MA_PULLBACK'
       ? '롱: 종가 > SMA200(추세), SMA20이 직전 봉보다 상승, 봉의 저가가 SMA20 이하로 내려왔다가 종가는 SMA20 위, 양봉. 숏은 대칭(SMA200 아래, SMA20 하락, 고가가 SMA20 이상·종가는 아래, 음봉). 손절 = 신호봉 저가(숏은 고가), 목표 = 신호봉 종가 + (종가 − 저가) × 손익비(기본 2). 전략 청산·트레일링·추가 매수 없음 — 손절 또는 목표에서만 청산(TradingView 원본과 동일). EMA9는 표시용(원본 조건에 사용되지 않음). 위 % 익절 설정은 쓰이지 않습니다.'
       : name === 'VOL_BREAKOUT'
       ? '롱: 종가가 당일(UTC 00시) 시가 + k×ATR을 이번 봉에서 새로 돌파하고 추세 EMA 위일 때. 숏은 더 엄격: 시가 − 숏 k×ATR 돌파 + EMA 아래 + EMA가 N봉 전보다 낮을 때만, 숏 최대 보유 별도. 거래량 확인: 돌파 봉 거래량이 직전 N봉 평균의 배수를 넘을 때만 진입(기본 2배 — 최대낙폭 17% → 9%, 수익률은 낮아짐). 청산: 추적선(최근 N봉 최고가 − ATR×배수) 이탈 또는 최대 보유 봉 수 도달(시간 청산). 손절 = 진입 시 ATR 비상 손절. 알트 전용(BTC·ETH 제외, 거래대금 상위 5개) · 1시간봉 · k3 · 24봉 · 엄격한 숏이 2년 워크포워드와 수수료 2배 테스트를 통과한 설정입니다(오늘 기준 상위 20개 목록이라 종목 선택 편향 있음).'
