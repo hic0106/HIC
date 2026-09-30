@@ -14,7 +14,22 @@ export const STRATEGY_CLASS = Object.fromEntries([
 ]);
 export const META = { ...CRYPTO_META, ...TRADFI_META };
 
-export const strategiesForSymbol = (sym) => (assetClassOf(sym) === 'CRYPTO' ? CRYPTO_STRATEGIES : TRADFI_STRATEGIES);
+// BTC regime filter (strategies.<name>.regime = { sma, exit }): while BTC's last daily close (closed at or before
+// closeT) is below its SMA(sma), no new longs; exit=true also closes open longs. Shorts untouched. No BTC data or
+// too few candles -> no filter. 2000-day backtest (2021-04..2026-09): ADX / TURTLE entry-only improved return and MDD.
+export function applyRegime(sig, scfg, btcDaily, closeT) {
+  const n = scfg?.regime?.sma;
+  if (!n || !sig.ready || !btcDaily?.length) return sig;
+  let k = btcDaily.length - 1;
+  while (k >= 0 && btcDaily[k].T > closeT) k--;
+  if (k + 1 < n) return sig;
+  let sum = 0;
+  for (let i = k - n + 1; i <= k; i++) sum += btcDaily[i].c;
+  if (btcDaily[k].c >= sum / n) return sig;
+  return { ...sig, longCond: false, longExit: scfg.regime.exit ? true : sig.longExit, regimeBlockLong: true };
+}
+
+export const strategiesForSymbol =(sym) => (assetClassOf(sym) === 'CRYPTO' ? CRYPTO_STRATEGIES : TRADFI_STRATEGIES);
 export const symbolsForStrategy = (st) => symbolsOfClass(STRATEGY_CLASS[st]);
 
 export function evaluateStrategy(name, candles, cfg) {

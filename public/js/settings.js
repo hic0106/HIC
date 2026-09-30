@@ -100,6 +100,8 @@ function stratCol(name, c, mode, supportsShort) {
     <div class="fr"><label>추가 매수 최대 횟수 (빈칸 = 공통)</label>${numIn('maxAdds', c.maxAdds ?? '', 1, 'min="0" max="5" placeholder="공통"')}</div>
     <div class="fr"><label>트레일링 스탑</label><select name="trailing.mode">${[['COMMON', '공통 설정'], ['ON', '사용'], ['OFF', '끔']].map(([k, t]) => `<option value="${k}" ${k === (c.trailing ? (c.trailing.enabled ? 'ON' : 'OFF') : 'COMMON') ? 'selected' : ''}>${t}</option>`).join('')}</select></div>
     <div class="fr amt"><label>트레일링 시작 / 간격 (ATR)</label>${numIn('trailing.activateAtr', c.trailing?.activateAtr ?? '', 0.5, 'min="0.5" placeholder="4"')}${numIn('trailing.trailAtr', c.trailing?.trailAtr ?? '', 0.5, 'min="0.5" placeholder="6"')}</div>
+    ${c.timeframe ? `<div class="fr"><label>BTC 하락장 필터 (BTC 일봉 &lt; SMA)</label><select name="regime.mode">${[['OFF', '끔'], ['ENTRY', '신규 롱 금지'], ['EXIT', '신규 롱 금지 + 롱 청산']].map(([k, t]) => `<option value="${k}" ${k === (c.regime ? (c.regime.exit ? 'EXIT' : 'ENTRY') : 'OFF') ? 'selected' : ''}>${t}</option>`).join('')}</select></div>
+    <div class="fr"><label>BTC SMA 기간 (일)</label>${numIn('regime.sma', c.regime?.sma ?? '', 1, 'min="10" max="400" placeholder="200"')}</div>` : ''}
     <div class="note">포지션 규모 = 주문금액 × 레버리지. 같은 종목의 거래소 레버리지는 켜진 전략 중 가장 높은 값으로 설정. 변경은 봇 정지 상태에서만 가능.</div>
     ${c.timeframe ? `<div class="set-sec">신호 캔들</div>
     <div class="fr"><label>캔들 (마감 기준)</label><select name="timeframe">${(S_META.timeframeChoices || ['5m', '4h', '1d']).map((t) => `<option value="${t}" ${t === c.timeframe ? 'selected' : ''}>${TF[t]}</option>`).join('')}</select></div>
@@ -220,6 +222,7 @@ function readStrategy(col) {
   $$('[name^="p."]', col).forEach((i) => { params[i.name.slice(2)] = i.type === 'checkbox' ? i.checked : i.value; });
   return {
     enabled: chk('enabled'), shortEnabled: chk('shortEnabled'), timeframe: val('timeframe'), leverage: val('leverage'), maxAdds: val('maxAdds'),
+    ...(v(col, 'regime.mode') ? { regime: { mode: val('regime.mode'), sma: val('regime.sma') } } : {}),
     trailing: { mode: val('trailing.mode'), activateAtr: val('trailing.activateAtr'), trailAtr: val('trailing.trailAtr') },
     universe: { topN: val('universe.topN'), excludeMajors: chk('universe.excludeMajors') },
     amounts: { PAPER: { long: val('PAPER.long'), short: val('PAPER.short') ?? 0 }, LIVE: { long: val('LIVE.long'), short: val('LIVE.short') ?? 0 } },

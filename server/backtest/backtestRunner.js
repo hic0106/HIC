@@ -130,6 +130,7 @@ export class BacktestRunner {
       need.set(`${s}|${timeframeOf(st, config)}`, { s, tf: timeframeOf(st, config) });
       if (dyn && STRATEGY_CLASS[st] === 'CRYPTO') need.set(`${s}|1d`, { s, tf: '1d' }); // daily quoteVolume for the historical ranking
     }
+    for (const st of strategies) if (config.strategies[st]?.regime?.sma) need.set('BTCUSDT|1d', { s: 'BTCUSDT', tf: '1d' }); // BTC regime filter
     return [...need.values()];
   }
 
@@ -167,7 +168,7 @@ export class BacktestRunner {
     const tf = custom ? custom.timeframe : timeframeOf(strategy, config);
     const uni = this.universeFor(config, ctx, strategy, custom);
     const r = await backtestStrategy({ strategy: strategy || custom?.meta?.label || 'AI', config, data: ctx.data[tf] || {}, funding: ctx.funding, start: from, end: to, capital, compound, custom,
-      symbols: custom ? undefined : symbolsFor(strategy, ctx.symbols),
+      symbols: custom ? undefined : symbolsFor(strategy, ctx.symbols), btcDaily: ctx.data['1d']?.BTCUSDT || null,
       tradeFilter: uni.tradeFilter || null, slots: uni.slots || null, universeNote: uni.universeNote || null });
     if (uni.meta) r.universe = uni.meta;
     return r;

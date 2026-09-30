@@ -43,6 +43,8 @@
 
 Stop은 ATR_DYNAMIC(min/max 클램프), LIVE에서는 Binance Algo STOP_MARKET로 등록. Take Profit은 봇이 감시.
 
+BTC 하락장 필터(`strategies.<name>.regime = { sma, exit }`, null=끔, `applyRegime()`): BTC 일봉 종가 < SMA면 신규 롱 금지(exit=true면 롱 청산), 숏은 그대로, START_SYNC 롱 합류도 막음. 엔진·백테스트·섀도 공용. 2000일(2021-04~2026-09) 검증: ADX 진입만 SMA100 +133→177%/MDD 35→31, TURTLE 진입만 SMA200 +137→153%/39→30. TSMOM은 SMA 기간별 결과가 들쭉날쭉(수익은 대부분 감소, MDD만 일관 감소)이라 끔.
+
 트레일링 스탑(`strategies.<name>.trailing`, null이면 `general.trailing`, 기본 켜짐 4/6, `trailingFor()`): 진입 ATR 기준, 유리한 방향 activateAtr 도달 시 손절을 본전으로, 이후 최고가 − trailAtr로 따라감(느슨해지지 않음). 1000일 백테스트(2026-09-28)에서 1/2는 세 전략 모두 악화, 4/6은 TREND_RIDER·VOL_BREAKOUT 개선·TSMOM 악화, 추가 매수 3회는 MDD 70%대. 전략 설정(공통/사용/끔) 또는 공통 설정 화면에서 변경. 2026-09-29 스윕(추가 매수 0, 20종목 후보로 재검증): 간격이 핵심, 시작 배수는 영향 작음. TURTLE 4/6, ADX 4/6 또는 끔(손절 ×2.5), TSMOM 2/6(끔은 악화 — 첫 스윕이 3종목만 써서 끔을 잘못 권장했음), 2/4는 전 전략 최하위. 봇 손절은 틱마다, Binance Stop은 최대 1분에 1회 새 Stop 등록 후 기존 취소. 청산 사유 TRAIL_STOP. 백테스트에도 반영(봉 극값으로 올린 뒤 종가가 새 손절 밖이면 그 가격에 청산).
 
 보유 포지션 표: 헤더 더블 클릭 정렬(오름→내림→해제, 한글/영문 localeCompare 'ko'), 전략·종목·방향 텍스트 필터.

@@ -516,3 +516,24 @@ test('binance: ids above 2^53 stay exact (strings), other numbers unchanged', ()
   assert.equal(r.time, 1790341487428);
   assert.deepEqual(r.ids, ['9007199254740993', 12]);
 });
+
+test('BTC regime filter: below SMA blocks new longs (exit mode also closes longs), shorts untouched, no data = no filter', async () => {
+  const { applyRegime } = await import('../server/strategyRegistry.js');
+  const DAY = 86_400_000;
+  const btc = Array.from({ length: 12 }, (_, i) => ({ t: i * DAY, T: (i + 1) * DAY - 1, c: i < 10 ? 100 : 80 })); // last 2 closes drop below SMA
+  const sig = { ready: true, longCond: true, shortCond: true, longExit: false, shortExit: false };
+  const cfg = (regime) => ({ regime });
+  assert.equal(applyRegime(sig, cfg(null), btc, 12 * DAY), sig, 'off');
+  const blocked = applyRegime(sig, cfg({ sma: 5, exit: false }), btc, 12 * DAY);
+  assert.equal(blocked.longCond, false);
+  assert.equal(blocked.longExit, false, 'entry-only mode keeps open longs');
+  assert.equal(blocked.shortCond, true, 'shorts untouched');
+  assert.equal(applyRegime(sig, cfg({ sma: 5, exit: true }), btc, 12 * DAY).longExit, true);
+  assert.equal(applyRegime(sig, cfg({ sma: 5, exit: false }), btc, 10 * DAY - 1).longCond, true, 'only BTC candles closed by then count (bull)');
+  assert.equal(applyRegime(sig, cfg({ sma: 50, exit: false }), btc, 12 * DAY).longCond, true, 'too few BTC candles: no filter');
+  assert.equal(applyRegime(sig, cfg({ sma: 5, exit: false }), null, 12 * DAY).longCond, true, 'no BTC data: no filter');
+  const cur = structuredClone(DEFAULT_CONFIG.strategies.ADX);
+  assert.deepEqual(validateStrategySettings('ADX', { ...cur, regime: { mode: 'ENTRY', sma: '100' } }, cur).regime, { sma: 100, exit: false });
+  assert.equal(validateStrategySettings('ADX', { ...cur, regime: { mode: 'OFF', sma: '100' } }, cur).regime, null);
+  assert.deepEqual(validateStrategySettings('ADX', cur, { ...cur, regime: { sma: 200, exit: true } }).regime, { sma: 200, exit: true }, 'kept when not submitted');
+});

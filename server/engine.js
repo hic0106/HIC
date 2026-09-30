@@ -1,7 +1,7 @@
 // Trading engine: strategy evaluation, pre-trade checks, paper/live execution,
 // emergency stops, funding, PnL accounting and UI snapshot.
 import { BinanceClient, BinanceError, endpoints, floorToStep, fmtQty, roundToTick, fmtPrice } from './binance.js';
-import { ALL_STRATEGIES as STRATEGIES, META as STRATEGY_META, evaluateStrategy as evaluate, strategiesForSymbol, STRATEGY_CLASS, exitFor, entryStop, stopReasonOf, trendCounts, recordTrendEntry, impliedSide } from './strategyRegistry.js';
+import { ALL_STRATEGIES as STRATEGIES, META as STRATEGY_META, evaluateStrategy as evaluate, applyRegime, strategiesForSymbol, STRATEGY_CLASS, exitFor, entryStop, stopReasonOf, trendCounts, recordTrendEntry, impliedSide } from './strategyRegistry.js';
 import { SYMBOLS, emptyModeState } from './store.js';
 import { SYMBOL_META, assetClassOf, ASSET_CLASSES } from './assets.js';
 import { EventEmitter } from 'node:events';
@@ -280,7 +280,7 @@ export class Engine {
   async evaluateSlot(strategy, symbol, trigger, opts = {}) {
     const scfg = this.cfg.strategies[strategy];
     const candles = opts.bars || barsFor(this.md, strategy, symbol, this.cfg);
-    const sig = evaluate(strategy, candles, scfg);
+    const sig = applyRegime(evaluate(strategy, candles, scfg), scfg, this.md.s.BTCUSDT?.daily, candles[candles.length - 1]?.T ?? Date.now());
     const slot = this.slot(strategy, symbol);
     if (!sig.ready) { slot.view = { notReady: sig.reason }; return { result: 'NOT_READY', reason: sig.reason, final: false, sig }; }
     slot.view = sig.view;
@@ -352,6 +352,7 @@ export class Engine {
     if (startSync && !exited && !side) {
       const closedSince = this.ms().trades.some((t) => t.strategy === strategy && t.symbol === symbol && t.exitTime >= (opts.candleClose ?? sig.candleTime));
       synced = closedSince ? null : impliedSide(strategy, candles, scfg);
+      if (synced?.side === 'LONG' && sig.regimeBlockLong) synced = null; // BTC regime filter: no joining a long trend
       if (synced) side = synced.side;
     }
 

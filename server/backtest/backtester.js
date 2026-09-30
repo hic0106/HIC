@@ -20,7 +20,7 @@
 // Sizing: each strategy has its own account (capital). Each slot gets equity / nSlots at entry (compound) or
 // capital / nSlots (fixed); nSlots = number of symbols, or `slots` (e.g. tradeTopN) when given - then at most
 // `slots` positions are open at once. 1x notional, no leverage.
-import { META, evaluateStrategy, symbolsForStrategy, exitFor, entryStop, stopReasonOf, trendCounts, recordTrendEntry } from '../strategyRegistry.js';
+import { META, evaluateStrategy, applyRegime, symbolsForStrategy, exitFor, entryStop, stopReasonOf, trendCounts, recordTrendEntry } from '../strategyRegistry.js';
 import { timeframeOf, US_SESSION } from '../scheduler/timeframes.js';
 import { maxAddsFor, trailingFor } from '../strategyConfig.js';
 
@@ -29,7 +29,7 @@ export const LIVE_WINDOW = new Proxy({ '1d': 500, [US_SESSION]: Infinity }, { ge
 const dirOf = (side) => (side === 'LONG' ? 1 : -1);
 
 // custom (optional): { cfg, meta, timeframe, prepare(bars) -> (i) => signal } for AI rule strategies (server/ai/dsl.js)
-export async function backtestStrategy({ strategy, config, data, funding = {}, start, end, capital, compound = true, symbols, custom = null, tradeFilter = null, slots = null, universeNote = null }) {
+export async function backtestStrategy({ strategy, config, data, funding = {}, start, end, capital, compound = true, symbols, custom = null, tradeFilter = null, slots = null, universeNote = null, btcDaily = null }) {
   symbols ||= custom?.symbols || symbolsForStrategy(strategy);
   const scfg = custom ? custom.cfg : config.strategies[strategy];
   const g = config.general;
@@ -176,7 +176,7 @@ export async function backtestStrategy({ strategy, config, data, funding = {}, s
       }
       lastPx[s] = b.c;
       // 4) strategy evaluation on this closed candle (same window length as live)
-      const sig = custom ? evalAt[s](i) : evaluateStrategy(strategy, bars[s].slice(Math.max(0, i + 1 - (Number.isFinite(W) ? W : i + 1)), i + 1), scfg);
+      const sig = custom ? evalAt[s](i) : applyRegime(evaluateStrategy(strategy, bars[s].slice(Math.max(0, i + 1 - (Number.isFinite(W) ? W : i + 1)), i + 1), scfg), scfg, btcDaily, b.T);
       if (!sig.ready) { stats.notReady[s] = (stats.notReady[s] || 0) + 1; continue; }
       if (pos[s]) {
         const ex = exitFor(strategy, sig, pos[s]);

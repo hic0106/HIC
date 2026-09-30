@@ -22,6 +22,13 @@ const parseTrailing = (t) => {
   return { enabled: t.mode ? t.mode === 'ON' : !!t.enabled, activateAtr: atr(t.activateAtr, 4), trailAtr: atr(t.trailAtr, 6) };
 };
 
+// BTC regime filter: { mode: 'OFF' | 'ENTRY' | 'EXIT', sma } (settings form) or a stored { sma, exit } / null
+const parseRegime = (r) => {
+  if (r == null || r.mode === 'OFF' || r.mode === '') return null;
+  const sma = num(r.sma === '' || r.sma == null ? 200 : r.sma, { min: 10, max: 400, int: true });
+  return { sma, exit: r.mode ? r.mode === 'EXIT' : !!r.exit };
+};
+
 // b = submitted settings, cur = current stored settings. Returns the validated next settings (throws on error).
 export function validateStrategySettings(name, b, cur) {
   const amt = (x) => num(x, { min: 0, max: 1e7 });
@@ -32,6 +39,7 @@ export function validateStrategySettings(name, b, cur) {
     leverage: num(b.leverage ?? cur.leverage ?? 1, { min: 1, max: STRATEGY_CLASS[name] === 'CRYPTO' ? 20 : 10, int: true }),
     maxAdds: ((m) => (m === '' || m == null ? null : num(m, { min: 0, max: 5, int: true })))('maxAdds' in b ? b.maxAdds : cur.maxAdds),
     trailing: parseTrailing('trailing' in b ? b.trailing : cur.trailing),
+    ...(STRATEGY_CLASS[name] === 'CRYPTO' ? { regime: parseRegime('regime' in b ? b.regime : cur.regime) } : {}),
     amounts: {
       PAPER: { long: amt(b.amounts.PAPER.long), short: amt(b.amounts.PAPER.short ?? 0) },
       LIVE: { long: amt(b.amounts.LIVE.long), short: amt(b.amounts.LIVE.short ?? 0) },
