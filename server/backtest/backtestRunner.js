@@ -19,6 +19,8 @@ const FUTURES_LAUNCH = Date.UTC(2019, 8, 1); // Binance USDⓈ-M launch: no data
 const CHART_CANDLES_MAX = 6000; // candles kept per series for the result chart (most recent)
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const FILE = path.join(DATA_DIR, 'backtest-last.json');
+// crypto candidates: a fixed list (reproducible runs) or the current watch list
+const symbolsFor = (st, fixed) => (fixed && STRATEGY_CLASS[st] === 'CRYPTO' ? fixed : symbolsForStrategy(st));
 const toCandle = (a) => ({ t: a[0], o: +a[1], h: +a[2], l: +a[3], c: +a[4], v: +a[5], T: a[6], qv: a[7] != null ? +a[7] : null }); // qv: quote volume (USDT)
 
 export class BacktestRunner {
@@ -94,11 +96,13 @@ export class BacktestRunner {
     return need.reduce((d, x) => Math.min(d, MAX_DAYS[x.tf] ?? Infinity), days);
   }
 
-  async loadData(config, days, need, onMsg = () => {}, into = null) {
+  // endAt: fixed period end (ms) for reproducible runs, else now
+  async loadData(config, days, need, onMsg = () => {}, into = null, endAt = null) {
     if (!into) days = this.effectiveDays(days, need);
-    const end = Date.now();
+    const now = Date.now(), end = endAt ?? now;
     const start = end - days * DAY;
-    const c = into || ((this.cache && this.cache.days === days && end - this.cache.at < 30 * 60_000) ? this.cache : { days, at: end, start, end, data: {}, funding: {} });
+    const fresh = this.cache && this.cache.days === days && (endAt ? this.cache.fixedEnd === endAt : !this.cache.fixedEnd && now - this.cache.at < 30 * 60_000);
+    const c = into || (fresh ? this.cache : { days, at: now, start, end, fixedEnd: endAt, data: {}, funding: {} });
     let k = 0;
     for (const { s, tf } of need) {
       if (c.data[tf]?.[s]) continue;
@@ -119,10 +123,10 @@ export class BacktestRunner {
     return c;
   }
 
-  needFor(config, strategies) {
+  needFor(config, strategies, fixedSymbols = null) {
     const need = new Map();
     const dyn = universeConfig(config).backtestDynamic;
-    for (const st of strategies) for (const s of symbolsForStrategy(st)) {
+    for (const st of strategies) for (const s of symbolsFor(st, fixedSymbols)) {
       need.set(`${s}|${timeframeOf(st, config)}`, { s, tf: timeframeOf(st, config) });
       if (dyn && STRATEGY_CLASS[st] === 'CRYPTO') need.set(`${s}|1d`, { s, tf: '1d' }); // daily quoteVolume for the historical ranking
     }
@@ -140,7 +144,7 @@ export class BacktestRunner {
     const fallback = excl.size ? { tradeFilter: (s) => !excl.has(s) } : {}; // no ranking: exclusions still apply
     if (!u.backtestDynamic || !crypto) return fallback;
     const topN = su?.topN || u.tradeTopN;
-    const symbols = (custom?.symbols || symbolsForStrategy(strategy)).filter((s) => !excl.has(s));
+    const symbols = (custom?.symbols || symbolsFor(strategy, ctx.symbols)).filter((s) => !excl.has(s));
     const always = (u.alwaysInclude || []).filter((s) => !excl.has(s));
     const daily = ctx.data['1d'] || {};
     if (!symbols.length || symbols.some((s) => !daily[s])) return fallback;
@@ -163,6 +167,7 @@ export class BacktestRunner {
     const tf = custom ? custom.timeframe : timeframeOf(strategy, config);
     const uni = this.universeFor(config, ctx, strategy, custom);
     const r = await backtestStrategy({ strategy: strategy || custom?.meta?.label || 'AI', config, data: ctx.data[tf] || {}, funding: ctx.funding, start: from, end: to, capital, compound, custom,
+      symbols: custom ? undefined : symbolsFor(strategy, ctx.symbols),
       tradeFilter: uni.tradeFilter || null, slots: uni.slots || null, universeNote: uni.universeNote || null });
     if (uni.meta) r.universe = uni.meta;
     return r;
@@ -175,12 +180,19 @@ export class BacktestRunner {
     return { full: await this.runOne(args), inSample: await this.runOne({ ...args, from: ctx.start, to: cut }), outSample: await this.runOne({ ...args, from: cut, to: ctx.end }), cut };
   }
 
-  async run({ days = 365, capital = 1_000_000, compound = true, strategies = ALL_STRATEGIES } = {}) {
+  // endAt: fixed period end (ms); symbols: fixed crypto candidates; sameAsLast: reuse the last run's end + candidates
+  async run({ days = 365, capital = 1_000_000, compound = true, strategies = ALL_STRATEGIES, endAt = null, symbols = null, sameAsLast = false } = {}) {
     if (this.status.state === 'RUNNING') return { ok: false, msg: 'backtest already running' };
+    if (sameAsLast) {
+      if (!this.last?.cond) return { ok: false, msg: 'no previous run with saved conditions' };
+      endAt = this.last.cond.end; symbols = this.last.cond.symbols;
+    }
     const config = structuredClone(this.store.config); // snapshot of the user's current settings
+    const cryptoSymbols = symbols?.length ? [...symbols] : symbolsForStrategy(ALL_STRATEGIES.find((s) => STRATEGY_CLASS[s] === 'CRYPTO'));
     this.status = { state: 'RUNNING', progress: 0, msg: 'loading data', startedAt: Date.now() };
     try {
-      const ctx = await this.loadData(config, days, this.needFor(config, strategies), (msg, progress) => { this.status.msg = msg; if (progress != null) this.status.progress = progress; });
+      const loaded = await this.loadData(config, days, this.needFor(config, strategies, cryptoSymbols), (msg, progress) => { this.status.msg = msg; if (progress != null) this.status.progress = progress; }, null, endAt);
+      const ctx = { ...loaded, symbols: cryptoSymbols };
       const { start, end, data } = ctx;
       if (ctx.days < days) this.log.warn(`Backtest period shortened to ${ctx.days} days (short candles: max ~${MAX_BARS} bars per symbol)`, 'BACKTEST');
       const results = [];
@@ -189,10 +201,12 @@ export class BacktestRunner {
         this.status.progress = 70 + Math.round((i / strategies.length) * 30);
         const r = await this.runOne({ config, ctx, strategy: st, capital, compound });
         r.assetClass = STRATEGY_CLASS[st];
+        r.robust = robustness(r, ctx.start, ctx.end);
         results.push(r);
         await new Promise((res) => setImmediate(res)); // keep the server responsive
       }
       const portfolio = combine(results, capital);
+      portfolio.robust = robustness({ ...portfolio, trades: results.flatMap((r) => r.trades) }, ctx.start, ctx.end);
       // candles in the test period for the chart view
       const candles = {};
       for (const [tf, bySym] of Object.entries(data)) for (const [s, rows] of Object.entries(bySym)) {
@@ -201,6 +215,7 @@ export class BacktestRunner {
       this.candles = candles;
       this.last = {
         ranAt: Date.now(), start, end, days: ctx.days, requestedDays: days, capital, compound, currency: 'KRW',
+        cond: { end, symbols: cryptoSymbols, fixedEnd: !!endAt, fixedSymbols: !!symbols?.length },
         settings: { general: { takerFeePct: config.general.takerFeePct, slippagePct: config.general.slippagePct, includeFunding: config.general.includeFunding } },
         results: results.map((r) => ({ ...r, equity: thin(r.equity, 1500), benchmark: thin(r.benchmark, 1500) })), portfolio,
       };
@@ -214,6 +229,22 @@ export class BacktestRunner {
       return { ok: false, msg: e.message };
     }
   }
+}
+
+// Robustness of one equity curve: first / second half return, worst rolling 180-day return, and net result without
+// the 3 best trades (trend strategies often live on a few outliers). Percentages of the starting capital / equity.
+export function robustness({ equity, trades, capital }, start, end) {
+  if (!equity?.length) return null;
+  const at = (t) => { let v = capital; for (const p of equity) { if (p.t > t) break; v = p.equity; } return v; };
+  const mid = start + (end - start) / 2, eMid = at(mid), eEnd = equity[equity.length - 1].equity;
+  const daily = [];
+  for (let t = start, i = 0, v = capital; t <= end; t += DAY) { while (i < equity.length && equity[i].t <= t) v = equity[i++].equity; daily.push(v); }
+  let worst180 = null;
+  for (let i = 180; i < daily.length; i++) if (daily[i - 180] > 0) worst180 = Math.min(worst180 ?? Infinity, (daily[i] / daily[i - 180] - 1) * 100);
+  const nets = trades.map((t) => t.net).sort((a, b) => b - a);
+  const total = nets.reduce((a, x) => a + x, 0), top3 = nets.slice(0, 3).reduce((a, x) => a + Math.max(0, x), 0);
+  return { h1Pct: (eMid / capital - 1) * 100, h2Pct: eMid > 0 ? (eEnd / eMid - 1) * 100 : null, worst180Pct: worst180,
+    top3Pct: (top3 / capital) * 100, exTop3Pct: ((total - top3) / capital) * 100 };
 }
 
 // keep at most n points (last point always kept)

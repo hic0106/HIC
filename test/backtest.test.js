@@ -219,3 +219,17 @@ test('chart: non-streamed interval follows price ticks, then refreshes the close
   md.onChartPrice('BTCUSDT', 200, now);
   assert.equal(md.chartCache.get('BTCUSDT:4h').candles[0].c, 1);
 });
+
+test('robustness: halves, worst 180 days, result without the 3 best trades', async () => {
+  const { robustness } = await import('../server/backtest/backtestRunner.js');
+  const DAY = 86_400_000;
+  // 400 days: flat 100 for 200 days, then 100 -> 150 linearly
+  const equity = Array.from({ length: 401 }, (_, i) => ({ t: i * DAY, equity: i <= 200 ? 100 : 100 + (i - 200) * 0.25 }));
+  const trades = [30, 20, 10, 5, -15].map((net) => ({ net }));
+  const r = robustness({ equity, trades, capital: 100 }, 0, 400 * DAY);
+  assert.ok(Math.abs(r.h1Pct) < 1e-9, 'first half flat');
+  assert.ok(Math.abs(r.h2Pct - 50) < 1e-9, 'second half +50%');
+  assert.ok(Math.abs(r.worst180Pct) < 1e-9, 'worst 180 days = the flat stretch');
+  assert.equal(r.top3Pct, 60);
+  assert.equal(r.exTop3Pct, -10, '5 - 15 without the three winners');
+});

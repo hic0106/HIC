@@ -162,10 +162,18 @@ app.get('/api/scheduler', (req, res) => res.json(scheduler.snapshot()));
 app.post('/api/backtest/run', (req, res) => {
   try {
     const b = req.body || {};
-    const days = num(b.days ?? 365, { min: 7, max: 1000, int: true });
+    const days = num(b.days ?? 365, { min: 7, max: 2500, int: true });
     const capital = num(b.capital ?? 1_000_000, { min: 1000, max: 1e12 });
+    // optional fixed period end (YYYY-MM-DD, inclusive): reproducible comparisons
+    let endAt = null;
+    if (b.endDate) {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(b.endDate)) throw new Error('bad endDate');
+      endAt = Date.parse(`${b.endDate}T00:00:00Z`) + 86_400_000;
+      if (!(endAt <= Date.now())) endAt = null; // today or later = now
+    }
     if (backtest.status.state === 'RUNNING') return ok(res, { ok: false, msg: 'backtest already running' });
-    backtest.run({ days, capital, compound: b.compound !== false });
+    if (b.sameAsLast && !backtest.last?.cond) return ok(res, { ok: false, msg: '같은 조건으로 쓸 지난 실행이 없습니다' });
+    backtest.run({ days, capital, compound: b.compound !== false, endAt, sameAsLast: !!b.sameAsLast });
     ok(res, { ok: true });
   } catch (e) { ok(res, { ok: false, msg: e.message }); }
 });

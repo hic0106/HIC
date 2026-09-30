@@ -29,7 +29,9 @@ export function mountBacktest(root) {
   root.innerHTML = `
     <div class="pf-card bt-bar">
       <b>백테스트</b>
-      <label>기간 <input type="number" id="btDays" value="365" min="7" max="1000" step="1"> 일</label>
+      <label>기간 <input type="number" id="btDays" value="365" min="7" max="2500" step="1"> 일</label>
+      <label title="비우면 오늘까지">끝 날짜 <input type="date" id="btEnd"></label>
+      <label title="지난 실행의 끝 날짜와 코인 후보 목록을 그대로 사용 (설정만 바꿔 비교할 때)"><input type="checkbox" id="btSame"> 지난 실행과 같은 조건</label>
       <label>전략별 투자금 <input type="number" id="btCap" value="1000000" min="1000" step="100000"> 원</label>
       <label><input type="checkbox" id="btComp" checked> 복리</label>
       <button class="btn primary" id="btRun">▶ 백테스트 실행</button>
@@ -54,7 +56,7 @@ export function mountBacktest(root) {
 }
 
 async function run() {
-  const body = { days: Number($('#btDays').value), capital: Number($('#btCap').value), compound: $('#btComp').checked };
+  const body = { days: Number($('#btDays').value), capital: Number($('#btCap').value), compound: $('#btComp').checked, endDate: $('#btEnd').value || null, sameAsLast: $('#btSame').checked };
   const r = await api('POST', '/api/backtest/run', body);
   if (!r.ok) return toast(r.msg || '백테스트 실패', 'err');
   pollStatus();
@@ -81,20 +83,21 @@ async function load() {
 
 function renderSummary() {
   const r = B.res;
-  $('#btMeta').textContent = `${fDateTime(r.start)} → ${fDateTime(r.end)} · 전략별 ₩${fNum(r.capital, 0)} · ${r.compound ? '복리' : '고정 금액'} · 수수료 ${r.settings.general.takerFeePct}% · 슬리피지 ${r.settings.general.slippagePct}% · 펀딩 ${r.settings.general.includeFunding ? '반영' : '제외'} · 실행 ${fDateTime(r.ranAt)}${r.requestedDays > r.days ? ` · 5분봉 전략이 있어 기간을 ${r.days}일로 줄임` : ''}`;
+  $('#btMeta').textContent = `${fDateTime(r.start)} → ${fDateTime(r.end)} · 전략별 ₩${fNum(r.capital, 0)} · ${r.compound ? '복리' : '고정 금액'} · 수수료 ${r.settings.general.takerFeePct}% · 슬리피지 ${r.settings.general.slippagePct}% · 펀딩 ${r.settings.general.includeFunding ? '반영' : '제외'} · 실행 ${fDateTime(r.ranAt)}${r.requestedDays > r.days ? ` · 5분봉 전략이 있어 기간을 ${r.days}일로 줄임` : ''}${r.cond ? ` · 코인 후보 ${r.cond.symbols.length}종목${r.cond.fixedSymbols ? '(고정)' : ''}${r.cond.fixedEnd ? ' · 끝 날짜 고정' : ''}` : ''}`;
   const bhRet = (x) => { const b = x.benchmark; return b.length ? (b[b.length - 1].equity / x.capital - 1) * 100 : null; };
+  const rob = (q) => q ? `<td class="${cls(q.h1Pct)}">${fPct(q.h1Pct, 0)}</td><td class="${cls(q.h2Pct)}">${fPct(q.h2Pct, 0)}</td><td class="${cls(q.worst180Pct)}">${q.worst180Pct != null ? fPct(q.worst180Pct, 0) : '—'}</td><td class="${cls(q.exTop3Pct)}" title="상위 3건 합계 ${fPct(q.top3Pct, 0)}">${fPct(q.exTop3Pct, 0)}</td>` : '<td></td><td></td><td></td><td></td>';
   const row = (x) => { const m = x.metrics; return `<tr data-st="${x.strategy}" class="${B.sel === x.strategy ? 'sel' : ''}">
     <td class="l"><i class="sw-dot" style="background:${ST_COLOR[x.strategy]}"></i><b>${SHORT[x.strategy]}</b>${x.enabled ? '' : ' <span class="muted">(꺼진 전략)</span>'}</td>
     <td class="l">${TFL[x.timeframe]}</td><td class="l" title="${esc(x.symbols.join(' '))}">${x.symbols.length > 4 ? `${x.symbols.length}종목${x.universe ? ` · 진입 상위 ${x.universe.tradeTopN}` : ''}` : x.symbols.map((s) => s.replace('USDT', '')).join(' ')}</td>
     <td>${won(m.finalEquity)}</td><td class="${cls(m.profit)}">${wonS(m.profit)}</td><td class="${cls(m.returnPct)}"><b>${fPct(m.returnPct)}</b></td>
     <td class="down">${m.maxDrawdownPct ? '−' + m.maxDrawdownPct.toFixed(2) + '%' : '0.00%'}</td><td>${m.trades}</td><td>${m.winRatePct != null ? m.winRatePct.toFixed(0) + '%' : '—'}</td>
-    <td>${pf(m.profitFactor)}</td><td>${m.sharpe != null ? m.sharpe.toFixed(2) : '—'}</td><td class="down">${wonS(-x.fees)}</td><td class="${cls(x.funding)}">${wonS(x.funding)}</td>
+    ${rob(x.robust)}<td>${pf(m.profitFactor)}</td><td>${m.sharpe != null ? m.sharpe.toFixed(2) : '—'}</td><td class="down">${wonS(-x.fees)}</td><td class="${cls(x.funding)}">${wonS(x.funding)}</td>
     <td class="${cls(bhRet(x))}">${fPct(bhRet(x))}</td><td class="l muted bt-notes" title="${esc(x.notes.map(noteKo).join('\n'))}">${esc(noteKo(x.notes[0] || ''))}</td></tr>`; };
   const P = r.portfolio, pm = P.metrics;
-  $('#btSummary').innerHTML = `<table class="t"><thead><tr><th>전략</th><th>캔들</th><th>종목</th><th>최종 금액</th><th>수익금</th><th>수익률</th><th>최대 낙폭</th><th>거래수</th><th>승률</th><th>손익비</th><th>샤프</th><th>수수료</th><th>펀딩비</th><th>단순 보유</th><th class="l">참고</th></tr></thead>
+  $('#btSummary').innerHTML = `<table class="t"><thead><tr><th>전략</th><th>캔들</th><th>종목</th><th>최종 금액</th><th>수익금</th><th>수익률</th><th>최대 낙폭</th><th>거래수</th><th>승률</th><th title="기간 앞 절반 수익률">전반</th><th title="기간 뒤 절반 수익률">후반</th><th title="가장 나빴던 180일 수익률">최악 180일</th><th title="가장 큰 이익 거래 3건을 뺀 순손익 (초기자본 대비). 마이너스면 소수의 큰 거래에 의존">상위3 제외</th><th>손익비</th><th>샤프</th><th>수수료</th><th>펀딩비</th><th>단순 보유</th><th class="l">참고</th></tr></thead>
     <tbody>${r.results.map(row).join('')}</tbody>
     <tfoot><tr data-st="PORTFOLIO" class="${B.sel === 'PORTFOLIO' ? 'sel' : ''}"><td class="l">전체 합계 (₩${fNum(P.capital, 0)})</td><td></td><td></td><td>${won(pm.finalEquity)}</td><td class="${cls(pm.profit)}">${wonS(pm.profit)}</td><td class="${cls(pm.returnPct)}">${fPct(pm.returnPct)}</td>
-    <td class="down">−${pm.maxDrawdownPct.toFixed(2)}%</td><td>${pm.trades}</td><td>${pm.winRatePct != null ? pm.winRatePct.toFixed(0) + '%' : '—'}</td><td>${pf(pm.profitFactor)}</td><td>${pm.sharpe != null ? pm.sharpe.toFixed(2) : '—'}</td><td></td><td></td><td></td><td class="l muted">모든 전략 계좌 합산 (일 단위)</td></tr></tfoot></table>`;
+    <td class="down">−${pm.maxDrawdownPct.toFixed(2)}%</td><td>${pm.trades}</td><td>${pm.winRatePct != null ? pm.winRatePct.toFixed(0) + '%' : '—'}</td>${rob(P.robust)}<td>${pf(pm.profitFactor)}</td><td>${pm.sharpe != null ? pm.sharpe.toFixed(2) : '—'}</td><td></td><td></td><td></td><td class="l muted">모든 전략 계좌 합산 (일 단위)</td></tr></tfoot></table>`;
 }
 
 function select(st) {
