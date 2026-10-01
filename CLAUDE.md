@@ -37,7 +37,7 @@
 | TSMOM | 코인 Universe | 1d | lookback 30, 롱만 |
 | RAYNER (기본 OFF) | 코인 Universe | 4h | EMA50 + MACD(1,50,9) 히스토그램 가속, STRUCTURE 손절(최근 10봉), 히스토그램 목표 익절(진입 시 고정), 추세당 최대 2회 |
 | MA_PULLBACK (기본 OFF) | 코인 Universe (전략 상위 5) | 1h | TradingView 눌림목 9EMA·20/200SMA 이식: SMA200 추세 + SMA20 상승 + 저가 SMA20 터치·종가 위 양봉(숏 대칭). 손절 = 신호봉 저가/고가(STRUCTURE), 목표 = 종가 ± rr(2)×손절폭 고정(`sig.tpTarget`). 전략 청산·트레일링·추가매수 없음(META noTrail/noAdds) |
-| MOM_ROTATION | 코인 Universe (감시 20 전체) | 1d | 횡단면 모멘텀: 후보 전체를 14봉 수익률로 순위, 상위 5 롱·밖으로 밀리면 청산. 추가 매수는 평균가 대비 +addGainPct(10)% 이상일 때만 일봉당 1회·최대 maxAdds(3) (`addGainOk`, 1000일 +49232% MDD 70%, 부분 익절은 시뮬레이션상 악화라 없음). BTC 필터 SMA100 exit(아래면 전부 현금). 순위는 `strategyRegistry.applyRank`(엔진·백테스트·섀도 공통, META crossRank). 손절 기본 OFF, 트레일링·추가매수 없음. HIC 백테스트 1000일(2026-09-30): +1766% MDD 54%, OOS +252% MDD 17%. 근거 연구 `klzzang/` |
+| MOM_ROTATION | 코인 Universe (감시 20 전체) | 1d | 횡단면 모멘텀: 후보 전체를 14봉 수익률로 순위, 상위 5 롱·밖으로 밀리면 청산. 추가 매수는 평균가 대비 +addGainPct(10)% 이상일 때만 일봉당 1회·최대 maxAdds(2), BTC > SMA100 +20%(bullSma/bullPct)면 +bullAdds(1) (`bullAddsFor`, 2000일 MDD 85% vs 고정 3회 90%) (`addGainOk`, 1000일 +49232% MDD 70%, 부분 익절은 시뮬레이션상 악화라 없음). BTC 필터 SMA100 exit(아래면 전부 현금). 순위는 `strategyRegistry.applyRank`(엔진·백테스트·섀도 공통, META crossRank). 손절 기본 OFF, 트레일링·추가매수 없음. HIC 백테스트 1000일(2026-09-30): +1766% MDD 54%, OOS +252% MDD 17%. 근거 연구 `klzzang/` |
 | QQQ_EMA_TREND / QQQ_TSMOM (ON), QQQ_SMA200 / QQQ_TURTLE_50_20 (OFF) | QQQUSDT | 미국 정규장 세션 | 롱/현금만 |
 
 추가 매수: 보유 중 같은 방향 진입 조건이 다시 참이면 캔들당 1회, 포지션당 최대 `strategies.<name>.maxAdds`(null이면 `general.maxAdds`, 기본 0=끔)회 추가. `maxAddsFor()`. 평균단가 합산, 손절은 추가 체결가 기준 재계산 후 유리한 쪽으로만 이동, LIVE는 기존 Binance Stop 취소 → 총수량으로 재등록. 백테스트에도 반영.

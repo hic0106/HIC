@@ -20,7 +20,7 @@
 // Sizing: each strategy has its own account (capital). Each slot gets equity / nSlots at entry (compound) or
 // capital / nSlots (fixed); nSlots = number of symbols, or `slots` (e.g. tradeTopN) when given - then at most
 // `slots` positions are open at once. 1x notional, no leverage.
-import { META, evaluateStrategy, applyRegime, applyRank, symbolsForStrategy, exitFor, entryStop, stopReasonOf, trendCounts, recordTrendEntry } from '../strategyRegistry.js';
+import { META, evaluateStrategy, applyRegime, applyRank, bullAddsFor, symbolsForStrategy, exitFor, entryStop, stopReasonOf, trendCounts, recordTrendEntry } from '../strategyRegistry.js';
 import { timeframeOf, US_SESSION } from '../scheduler/timeframes.js';
 import { maxAddsFor, addGainOk, trailingFor } from '../strategyConfig.js';
 
@@ -194,7 +194,7 @@ export async function backtestStrategy({ strategy, config, data, funding = {}, s
           const p = pos[s];
           const again = p.side === 'LONG' ? sig.longCond : sig.shortCond && scfg.shortEnabled;
           const trendFull = meta.trendEntries && trendCounts(sig, trendEntries[s])[p.side] >= scfg.params.maxEntriesPerTrend;
-          if (again && !trendFull && p.adds < maxAdds && addGainOk(scfg, p.side, p.entry, b.c) && (!tradeFilter || tradeFilter(s, b.T + 1))) {
+          if (again && !trendFull && p.adds < maxAdds + (maxAdds ? bullAddsFor(scfg, btcDaily, b.T) : 0) && addGainOk(scfg, p.side, p.entry, b.c) && (!tradeFilter || tradeFilter(s, b.T + 1))) {
             pending[s].push({ type: 'ENTRY', add: true, side: p.side, atr: sig.atr, structStop: sig.structStop?.[p.side] ?? null, signalCandle: sig.candleTime, signalTime: b.T + 1 });
           }
           continue;

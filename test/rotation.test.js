@@ -6,7 +6,7 @@ import path from 'node:path';
 
 process.env.HIC_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'hic-rotation-'));
 process.env.HIC_LOG_STDOUT = '0';
-const { evaluateStrategy, applyRank, applyRegime, momentumAt } = await import('../server/strategyRegistry.js');
+const { evaluateStrategy, applyRank, applyRegime, momentumAt, bullAddsFor } = await import('../server/strategyRegistry.js');
 const { DEFAULT_CONFIG } = await import('../server/store.js');
 const { backtestStrategy } = await import('../server/backtest/backtester.js');
 const { validateStrategySettings, addGainOk } = await import('../server/strategyConfig.js');
@@ -69,7 +69,7 @@ test('MOM_ROTATION backtest: leadership switch rotates the position, never more 
 test('MOM_ROTATION settings are validated', () => {
   const cur = DEFAULT_CONFIG.strategies.MOM_ROTATION;
   const next = validateStrategySettings('MOM_ROTATION', { ...structuredClone(cur), params: { lookback: '21', topK: '3', addGainPct: '15' } }, cur);
-  assert.deepEqual(next.params, { lookback: 21, topK: 3, addGainPct: 15 });
+  assert.deepEqual(next.params, { lookback: 21, topK: 3, addGainPct: 15, bullAdds: 1, bullSma: 100, bullPct: 20 });
   assert.deepEqual(next.regime, { sma: 100, exit: true });
   assert.throws(() => validateStrategySettings('MOM_ROTATION', { ...structuredClone(cur), params: { lookback: 14, topK: 50 } }, cur));
 });
@@ -95,4 +95,16 @@ test('MOM_ROTATION backtest: add-ons go to the winner only, at most maxAdds', as
   const a = r.openPositions.find((p) => p.symbol === 'AUSDT'), b = r.openPositions.find((p) => p.symbol === 'BUSDT');
   assert.equal(r.adds, 3);
   assert.ok(a.notional > 3.9 * b.notional, `winner holds 4 units: A ${a.notional} vs B ${b.notional}`);
+});
+
+test('bullAddsFor: extra add-ons only while BTC is bullPct above its SMA', () => {
+  const c = { params: { bullAdds: 1, bullSma: 10, bullPct: 20 } };
+  const flat = bars(path_(20, () => 100));
+  const strong = bars([...path_(19, () => 100), 130]); // last close 130 vs SMA10 103 -> +26%
+  const mild = bars([...path_(19, () => 100), 115]); // +13%
+  assert.equal(bullAddsFor(c, flat, flat.at(-1).T), 0);
+  assert.equal(bullAddsFor(c, strong, strong.at(-1).T), 1);
+  assert.equal(bullAddsFor(c, mild, mild.at(-1).T), 0);
+  assert.equal(bullAddsFor(c, strong, strong.at(-2).T), 0); // only candles closed by closeT
+  assert.equal(bullAddsFor({ params: { bullAdds: 0, bullSma: 10 } }, strong, strong.at(-1).T), 0);
 });

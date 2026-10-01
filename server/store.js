@@ -124,9 +124,10 @@ export const DEFAULT_CONFIG = {
     MOM_ROTATION: {
       enabled: false, timeframe: '1d', shortEnabled: false, leverage: 1, amounts: amounts(100, 0),
       // add-ons only to winners: +addGainPct % over the average entry, one per daily candle, at most maxAdds
-      maxAdds: 3,
+      // (+bullAdds while BTC > SMA(bullSma) x (1 + bullPct %): 2000d 2 + 1 at +20% -> MDD 85% vs 90% with a fixed 3)
+      maxAdds: 2,
       universe: { topN: 20, excludeMajors: false }, regime: { sma: 100, exit: true },
-      params: { lookback: 14, topK: 5, addGainPct: 10 },
+      params: { lookback: 14, topK: 5, addGainPct: 10, bullAdds: 1, bullSma: 100, bullPct: 20 },
       stop: { mode: 'OFF', atrPeriod: 14, atrMult: 4, minPct: 15, maxPct: 40, fixedPct: 30 },
       takeProfit: { enabled: false, pct: 100 },
     },

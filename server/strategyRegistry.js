@@ -53,6 +53,19 @@ export function applyRank(sig, name, scfg, symbol, candidates, barsOf, closeT) {
   return { ...sig, longCond: top && !sig.regimeBlockLong, longExit: sig.longExit || !top, view: { ...sig.view, rank, candidates: ranked.length } };
 }
 
+// Extra add-ons in a strong market (MOM_ROTATION params.bullAdds): while BTC's last daily close (closed at or before
+// closeT) is above SMA(params.bullSma) x (1 + params.bullPct %), maxAdds is raised by bullAdds. No data -> 0.
+export function bullAddsFor(scfg, btcDaily, closeT) {
+  const p = scfg?.params;
+  if (!p?.bullAdds || !p.bullSma || !btcDaily?.length) return 0;
+  let k = btcDaily.length - 1;
+  while (k >= 0 && btcDaily[k].T > closeT) k--;
+  if (k + 1 < p.bullSma) return 0;
+  let sum = 0;
+  for (let i = k - p.bullSma + 1; i <= k; i++) sum += btcDaily[i].c;
+  return btcDaily[k].c > (sum / p.bullSma) * (1 + (p.bullPct || 0) / 100) ? p.bullAdds : 0;
+}
+
 export const strategiesForSymbol =(sym) => (assetClassOf(sym) === 'CRYPTO' ? CRYPTO_STRATEGIES : TRADFI_STRATEGIES);
 export const symbolsForStrategy = (st) => symbolsOfClass(STRATEGY_CLASS[st]);
 

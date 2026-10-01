@@ -1,7 +1,7 @@
 // Trading engine: strategy evaluation, pre-trade checks, paper/live execution,
 // emergency stops, funding, PnL accounting and UI snapshot.
 import { BinanceClient, BinanceError, endpoints, floorToStep, fmtQty, roundToTick, fmtPrice } from './binance.js';
-import { ALL_STRATEGIES as STRATEGIES, META as STRATEGY_META, evaluateStrategy as evaluate, applyRegime, applyRank, strategiesForSymbol, STRATEGY_CLASS, exitFor, entryStop, stopReasonOf, trendCounts, recordTrendEntry, impliedSide } from './strategyRegistry.js';
+import { ALL_STRATEGIES as STRATEGIES, META as STRATEGY_META, evaluateStrategy as evaluate, applyRegime, applyRank, bullAddsFor, strategiesForSymbol, STRATEGY_CLASS, exitFor, entryStop, stopReasonOf, trendCounts, recordTrendEntry, impliedSide } from './strategyRegistry.js';
 import { SYMBOLS, emptyModeState } from './store.js';
 import { SYMBOL_META, assetClassOf, ASSET_CLASSES } from './assets.js';
 import { EventEmitter } from 'node:events';
@@ -330,7 +330,8 @@ export class Engine {
         const pos = slot.position;
         const again = side === 'LONG' ? sig.longCond : sig.shortCond && scfg.shortEnabled;
         const trendFull = STRATEGY_META[strategy].trendEntries && (slot.trendCount?.[side] || 0) >= scfg.params.maxEntriesPerTrend;
-        const maxAdds = STRATEGY_META[strategy].noAdds ? 0 : maxAddsFor(scfg, this.cfg.general);
+        const baseAdds = STRATEGY_META[strategy].noAdds ? 0 : maxAddsFor(scfg, this.cfg.general);
+        const maxAdds = baseAdds ? baseAdds + bullAddsFor(scfg, this.md.s.BTCUSDT?.daily, closeT) : 0; // add-ons off stays off
         if (again && allowEntry && !trendFull && (pos.adds || 0) < maxAdds && addGainOk(scfg, side, pos.entryPrice, sig.close)) {
           if (!slot.lastSkip) this.log.trade(`${tag} ${side} signal while holding — add ${(pos.adds || 0) + 1}/${maxAdds} (${trigger})`, 'SIGNAL');
           const r = await this.openPosition(strategy, symbol, side, sig, true);
