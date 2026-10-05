@@ -30,24 +30,39 @@ export function applyRegime(sig, scfg, btcDaily, closeT) {
 }
 
 // Cross-sectional momentum (META.crossRank): long while `symbol` is among the params.topK candidates by
-// params.lookback-candle return, all measured on the candle closing at closeT (candidates without that candle are left
-// out, so a symbol outside the candidates ranks null -> exit). Apply after applyRegime (a blocked long stays blocked).
+// params.lookback-candle return (rankMode='volAdj': return / simple-return SD). Only the candle closing at closeT
+// is read; candidates missing that candle are left out, so a symbol outside the candidates ranks null -> exit.
+// Apply after applyRegime (a blocked long stays blocked).
 // ponytail: live, a candidate whose closing candle has not arrived yet is left out -> others rank higher (at worst an
 // extra entry, never a false exit); a wait-for-all-closes gate if that shows up in the Signal Log.
-export function momentumAt(bars, closeT, lb) {
+export function momentumAt(bars, closeT, lb, rankMode = 'return') {
   let lo = 0, hi = (bars?.length ?? 0) - 1;
   while (lo <= hi) {
     const m = (lo + hi) >> 1;
     if (bars[m].T < closeT) lo = m + 1;
     else if (bars[m].T > closeT) hi = m - 1;
-    else return m >= lb && bars[m - lb].c > 0 ? bars[m].c / bars[m - lb].c - 1 : null;
+    else {
+      if (m < lb || !(bars[m - lb].c > 0)) return null;
+      const ret = bars[m].c / bars[m - lb].c - 1;
+      if (rankMode !== 'volAdj') return ret;
+      // On daily candles: lookback-day return / sample SD of those daily simple returns.
+      // A zero (or rounding-noise) SD has no defined score and is excluded from ranking.
+      const returns = [];
+      for (let i = m - lb + 1; i <= m; i++) {
+        if (!(bars[i - 1].c > 0)) return null;
+        returns.push(bars[i].c / bars[i - 1].c - 1);
+      }
+      const mean = returns.reduce((a, r) => a + r, 0) / returns.length;
+      const sd = Math.sqrt(returns.reduce((a, r) => a + (r - mean) ** 2, 0) / (returns.length - 1));
+      return sd > 1e-12 ? ret / sd : null;
+    }
   }
   return null;
 }
 
 export function applyRank(sig, name, scfg, symbol, candidates, barsOf, closeT) {
   if (!META[name]?.crossRank || !sig.ready) return sig;
-  const ranked = candidates.map((s) => [s, momentumAt(barsOf(s), closeT, scfg.params.lookback)]).filter(([, m]) => m != null).sort((a, b) => b[1] - a[1]);
+  const ranked = candidates.map((s) => [s, momentumAt(barsOf(s), closeT, scfg.params.lookback, scfg.params.rankMode)]).filter(([, m]) => m != null).sort((a, b) => b[1] - a[1]);
   const rank = ranked.findIndex(([s]) => s === symbol) + 1 || null;
   const top = rank != null && rank <= scfg.params.topK;
   return { ...sig, longCond: top && !sig.regimeBlockLong, longExit: sig.longExit || !top, view: { ...sig.view, rank, candidates: ranked.length } };

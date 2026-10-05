@@ -69,7 +69,7 @@ test('MOM_ROTATION backtest: leadership switch rotates the position, never more 
 test('MOM_ROTATION settings are validated', () => {
   const cur = DEFAULT_CONFIG.strategies.MOM_ROTATION;
   const next = validateStrategySettings('MOM_ROTATION', { ...structuredClone(cur), params: { lookback: '21', topK: '3', addGainPct: '15' } }, cur);
-  assert.deepEqual(next.params, { lookback: 21, topK: 3, addGainPct: 15, bullAdds: 1, bullSma: 100, bullPct: 20 });
+  assert.deepEqual(next.params, { lookback: 21, topK: 3, addGainPct: 15, bullAdds: 1, bullSma: 100, bullPct: 20, rankMode: 'return' });
   assert.deepEqual(next.regime, { sma: 100, exit: true });
   assert.throws(() => validateStrategySettings('MOM_ROTATION', { ...structuredClone(cur), params: { lookback: 14, topK: 50 } }, cur));
 });
@@ -107,4 +107,72 @@ test('bullAddsFor: extra add-ons only while BTC is bullPct above its SMA', () =>
   assert.equal(bullAddsFor(c, mild, mild.at(-1).T), 0);
   assert.equal(bullAddsFor(c, strong, strong.at(-2).T), 0); // only candles closed by closeT
   assert.equal(bullAddsFor({ params: { bullAdds: 0, bullSma: 10 } }, strong, strong.at(-1).T), 0);
+});
+
+test('momentumAt volAdj: lookback return divided by sample standard deviation of daily simple returns', () => {
+  const b = bars([100, 120, 108, 129.6, 999]);
+  const score = momentumAt(b, b[3].T, 3, 'volAdj');
+  assert.ok(Math.abs(score - 0.296 / Math.sqrt(0.03)) < 1e-10);
+  assert.equal(score, momentumAt(b.slice(0, 4), b[3].T, 3, 'volAdj'), 'future candle is not read');
+  assert.equal(momentumAt(b, b[1].T, 3, 'volAdj'), null);
+  assert.equal(momentumAt(b, b[3].T + 1, 3, 'volAdj'), null);
+});
+
+test('momentumAt volAdj: zero volatility is unrankable, including a constant growth rate', () => {
+  const flat = bars([100, 100, 100, 100]);
+  const growth = bars([100, 110, 121, 133.1]);
+  assert.equal(momentumAt(flat, flat.at(-1).T, 3, 'volAdj'), null);
+  assert.equal(momentumAt(growth, growth.at(-1).T, 3, 'volAdj'), null);
+});
+
+test('MOM_ROTATION volAdj: a volatile pump loses entry rank to a steadier leader', () => {
+  const data = {
+    PUMPUSDT: bars([...path_(39, () => 100), 250]),
+    STEADYUSDT: bars(path_(40, (i) => 100 * 1.02 ** i * (i % 2 ? 1.005 : 1))),
+  };
+  const closeT = data.PUMPUSDT.at(-1).T;
+  const rank = (mode, symbol, candidates = Object.keys(data)) => {
+    const c = cfg({ params: { lookback: 14, topK: 1, rankMode: mode } });
+    return applyRank(evaluateStrategy('MOM_ROTATION', data[symbol], c), 'MOM_ROTATION', c, symbol, candidates, (s) => data[s], closeT);
+  };
+  assert.equal(rank('return', 'PUMPUSDT').longCond, true);
+  assert.equal(rank('volAdj', 'PUMPUSDT').longCond, false);
+  assert.equal(rank('volAdj', 'STEADYUSDT').longCond, true);
+  // A pump is not an unconditional exit rule: a held coin still in topK remains held.
+  const held = rank('volAdj', 'PUMPUSDT', ['PUMPUSDT']);
+  assert.equal(held.longExit, false);
+  assert.equal(held.view.rank, 1);
+});
+
+test('MOM_ROTATION: default return mode reproduces legacy ranks and backtest results', async () => {
+  const base = structuredClone(DEFAULT_CONFIG);
+  base.strategies.MOM_ROTATION = cfg({ params: { lookback: 5, topK: 1 }, maxAdds: 0 });
+  const explicit = structuredClone(base);
+  explicit.strategies.MOM_ROTATION.params.rankMode = 'return';
+  const data = {
+    AUSDT: bars(path_(80, (i) => i < 35 ? 100 + i * 2 : 170 - (i - 35))),
+    BUSDT: bars(path_(80, (i) => i < 35 ? 100 : 100 + (i - 35) * 2)),
+  };
+  const args = { strategy: 'MOM_ROTATION', data, start: 0, end: 80 * DAY, capital: 1000, symbols: Object.keys(data) };
+  const legacy = await backtestStrategy({ ...args, config: base });
+  const current = await backtestStrategy({ ...args, config: explicit });
+  assert.deepEqual(current.equity, legacy.equity);
+  assert.deepEqual(current.trades, legacy.trades);
+  assert.deepEqual(current.metrics, legacy.metrics);
+  assert.equal(DEFAULT_CONFIG.strategies.MOM_ROTATION.params.rankMode, 'return');
+});
+
+test('MOM_ROTATION rankMode validation: allow return/volAdj, reject others, preserve omitted setting', () => {
+  const cur = structuredClone(DEFAULT_CONFIG.strategies.MOM_ROTATION);
+  const submit = (rankMode) => ({ ...structuredClone(cur), params: { ...cur.params, rankMode } });
+  assert.equal(validateStrategySettings('MOM_ROTATION', submit('volAdj'), cur).params.rankMode, 'volAdj');
+  assert.equal(validateStrategySettings('MOM_ROTATION', submit('return'), cur).params.rankMode, 'return');
+  for (const invalid of ['sharpe', '', null, 1, true]) {
+    assert.throws(() => validateStrategySettings('MOM_ROTATION', submit(invalid), cur), /rank mode/);
+  }
+  const omitted = structuredClone(cur);
+  delete omitted.params.rankMode;
+  const enabled = { ...cur, params: { ...cur.params, rankMode: 'volAdj' } };
+  assert.equal(validateStrategySettings('MOM_ROTATION', omitted, enabled).params.rankMode, 'volAdj');
+  assert.equal(validateStrategySettings('MOM_ROTATION', omitted, omitted).params.rankMode, 'return');
 });

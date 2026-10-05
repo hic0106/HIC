@@ -36,7 +36,7 @@ export const STRATEGY_META = {
   // symbol drops out of the topK. The rank needs every candidate's candles -> applied by strategyRegistry.applyRank
   // (evaluate alone never enters). Pair with the BTC regime filter (regime.exit) for the cash-in-bear-markets rule.
   MOM_ROTATION: { label: 'Momentum Rotation', short: 'O', supportsShort: false, resetAfterStop: true, crossRank: true, noTrail: true,
-    exitRule: (p) => `${p.lookback}봉 수익률 상위 ${p.topK} 이탈` },
+    exitRule: (p) => `${p.lookback}봉 ${p.rankMode === 'volAdj' ? '변동성 조정 모멘텀' : '수익률'} 상위 ${p.topK} 이탈` },
 };
 
 // Exit reason for an emergency stop of the given stop mode.

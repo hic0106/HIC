@@ -127,7 +127,8 @@ export const DEFAULT_CONFIG = {
       // (+bullAdds while BTC > SMA(bullSma) x (1 + bullPct %): 2000d 2 + 1 at +20% -> MDD 85% vs 90% with a fixed 3)
       maxAdds: 2,
       universe: { topN: 20, excludeMajors: false }, regime: { sma: 100, exit: true },
-      params: { lookback: 14, topK: 5, addGainPct: 10, bullAdds: 1, bullSma: 100, bullPct: 20 },
+      // Optional volatility-adjusted ranking; default keeps the existing raw-return order.
+      params: { lookback: 14, topK: 5, addGainPct: 10, bullAdds: 1, bullSma: 100, bullPct: 20, rankMode: 'return' },
       stop: { mode: 'OFF', atrPeriod: 14, atrMult: 4, minPct: 15, maxPct: 40, fixedPct: 30 },
       takeProfit: { enabled: false, pct: 100 },
     },

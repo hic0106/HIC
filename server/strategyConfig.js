@@ -71,8 +71,12 @@ export function validateStrategySettings(name, b, cur) {
   if (name === 'TURTLE') next.params = { entryPeriod: num(b.params.entryPeriod, P), exitPeriod: num(b.params.exitPeriod, P), smaFilter: num(b.params.smaFilter, P) };
   if (name === 'ADX') next.params = { adxPeriod: num(b.params.adxPeriod, P), threshold: num(b.params.threshold, { min: 1, max: 100 }), smaFilter: num(b.params.smaFilter, P) };
   if (name === 'TSMOM') next.params = { lookback: num(b.params.lookback, P) };
-  if (name === 'MOM_ROTATION') next.params = { lookback: num(b.params.lookback, P), topK: num(b.params.topK, { min: 1, max: 20, int: true }), addGainPct: num(b.params.addGainPct ?? 10, { min: 0, max: 500 }),
-    bullAdds: num(b.params.bullAdds ?? cur.params?.bullAdds ?? 0, { min: 0, max: 5, int: true }), bullSma: num(b.params.bullSma ?? cur.params?.bullSma ?? 100, { min: 10, max: 400, int: true }), bullPct: num(b.params.bullPct ?? cur.params?.bullPct ?? 20, { min: 0, max: 100 }) };
+  if (name === 'MOM_ROTATION') {
+    const rankMode = 'rankMode' in b.params ? b.params.rankMode : (cur.params?.rankMode ?? 'return');
+    if (!['return', 'volAdj'].includes(rankMode)) throw new Error('invalid rank mode');
+    next.params = { lookback: num(b.params.lookback, P), topK: num(b.params.topK, { min: 1, max: 20, int: true }), addGainPct: num(b.params.addGainPct ?? 10, { min: 0, max: 500 }),
+      bullAdds: num(b.params.bullAdds ?? cur.params?.bullAdds ?? 0, { min: 0, max: 5, int: true }), bullSma: num(b.params.bullSma ?? cur.params?.bullSma ?? 100, { min: 10, max: 400, int: true }), bullPct: num(b.params.bullPct ?? cur.params?.bullPct ?? 20, { min: 0, max: 100 }), rankMode };
+  }
   if (name === 'VOL_BREAKOUT') next.params = { k: num(b.params.k, { min: 0.1, max: 10 }), levelAtr: num(b.params.levelAtr, P), trailPeriod: num(b.params.trailPeriod, P), trailMult: num(b.params.trailMult, { min: 0.5, max: 10 }), maxHoldBars: num(b.params.maxHoldBars, { min: 1, max: 1000, int: true }), trendPeriod: num(b.params.trendPeriod, { min: 0, max: 1000, int: true }),
     shortK: num(b.params.shortK ?? b.params.k, { min: 0.1, max: 10 }), shortHoldBars: num(b.params.shortHoldBars ?? b.params.maxHoldBars, { min: 1, max: 1000, int: true }), shortSlopeBars: num(b.params.shortSlopeBars ?? 0, { min: 0, max: 1000, int: true }),
     volMult: num(b.params.volMult ?? 0, { min: 0, max: 20 }), volPeriod: num(b.params.volPeriod ?? 20, { min: 2, max: 500, int: true }) };
